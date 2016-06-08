@@ -1,5 +1,5 @@
 import pandas as pd
-from bayespy.network import DiscreteNode
+from bayespy.network import Discrete
 from bayespy.network import state
 import numpy as np
 
@@ -80,7 +80,7 @@ class AutoInsight:
 
         (network, network_builder) = self._factory.create_network()
 
-        if not isinstance(target, DiscreteNode):
+        if not isinstance(target, Discrete):
             raise ValueError("target should be of type discretenode")
 
         network_builder.build_naive_network_with_latent_parents(discrete=self._discrete,
@@ -118,7 +118,7 @@ class AutoInsight:
 
                 row = self._get_row(discrete_features, target)
                 difference.append(row.difference)
-                evi = DiscreteNode(row.variable, row.state).tostring()
+                evi = Discrete(row.variable, row.state).tostring()
                 base_evidence.append(evi)
 
             if prev_target_prob > 90:

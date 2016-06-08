@@ -6,5 +6,6 @@ from bayespy import network
 from bayespy import visual
 from bayespy.jni import bayesServer as _bs
 
+
 def license(key):
     l = _bs.License.validate(key)

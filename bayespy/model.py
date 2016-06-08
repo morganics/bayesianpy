@@ -36,7 +36,7 @@ class Query:
             variables = self._jnetwork.getVariables()
 
         for v in variables:
-            if bayespy.network.Network.is_variable_discrete(v):
+            if bayespy.network.is_variable_discrete(v):
                 table = bayesServer.Table(v)
             else:
                 table = bayesServer.CLGaussian(v)
@@ -54,7 +54,7 @@ class Query:
         variance = []
         for v in variables:
             dist =  distributions[v.getName()]
-            if bayespy.network.Network.is_variable_discrete(v):
+            if bayespy.network.is_variable_discrete(v):
                 for state in v.getStates():
                     states.append(state.getName())
                     values.append(float(dist.get([state])))
@@ -80,7 +80,7 @@ class Evidence:
             if not isinstance(value, tuple):
                 node, state = value.split(bayespy.network.STATE_DELIMITER)
                 v = self._variables.get(node)
-                if bayespy.network.Network.is_variable_discrete(v):
+                if bayespy.network.is_variable_discrete(v):
                     st = v.getStates().get(state)
                     if st is None:
                         raise ValueError("State {} does not exist in variable {}".format(state, node))
@@ -90,7 +90,7 @@ class Evidence:
                     raise ValueError("Can not find state on a continuous variable")
             else:
                 v = self._variables.get(value[0])
-                if not bayespy.network.Network.is_variable_continuous(v):
+                if not bayespy.network.is_variable_continuous(v):
                     raise ValueError("Variable is not continuous")
 
                 self._evidence.set(v, jp.java.lang.Double(value[1]))
@@ -144,7 +144,7 @@ class NetworkModel:
 
             valueType = bayesServer.data.ColumnValueType.VALUE
 
-            if bayespy.network.Network.is_variable_discrete(v):
+            if bayespy.network.is_variable_discrete(v):
                 if not DataFrame.is_int(data[v.getName()].dtype) and not DataFrame.is_bool(data[v.getName()].dtype):
                     valueType = bayesServer.data.ColumnValueType.NAME
 
@@ -195,7 +195,7 @@ class NetworkModel:
         target_nodes = []
         for target_node in targets:
             v = self._jnetwork.getVariables().get(target_node)
-            if bayespy.network.Network.is_variable_continuous(v):
+            if bayespy.network.is_variable_continuous(v):
                 n = bayesServer.CLGaussian(v)
             else:
                 n = bayesServer.Table(v)
@@ -217,7 +217,7 @@ class NetworkModel:
                 print(e)
 
             for v, target in target_nodes:
-                if self._is_variable_continuous(v):
+                if bayespy.network.is_variable_continuous(v):
                     #continuous
                     results[v.getName()].append(target.getMean(v))
                 else:

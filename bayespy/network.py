@@ -6,6 +6,7 @@ from bayespy.data import DataFrame
 
 from bayespy.model import NetworkModel
 
+
 def create_network():
     return bayesServer.Network(str(uuid.getnode()))
 
@@ -23,7 +24,7 @@ def state(variable, state):
     return "{0}{1}{2}".format(variable, STATE_DELIMITER, state)
 
 
-class DiscreteNode:
+class Discrete:
     def __init__(self, variable, state):
         self.variable = variable
         self.state = state
@@ -33,7 +34,7 @@ class DiscreteNode:
 
     @staticmethod
     def fromstring(text):
-        return DiscreteNode(*text.split(STATE_DELIMITER))
+        return Discrete(*text.split(STATE_DELIMITER))
 
 
 class NetworkBuilder:
@@ -71,10 +72,8 @@ class NetworkBuilder:
                 d = self._create_discrete_variable(discrete, d_name, discrete[d_name].unique())
                 self._create_link(parent, d)
 
-        self.export("C:\\Users\\imorgan\\Documents\\FeatureSelection2\\lt.bayes")
-
     def export(self, path):
-        self._jnetwork.save(path)
+        save(path)
 
     def _create_link(self, n1, n2, t=None):
         if isinstance(n1, str):
@@ -194,7 +193,7 @@ class NetworkBuilder:
     def remove_continuous_nodes(self):
         to_remove = []
         for v in self._jnetwork.getVariables():
-            if Network.is_variable_continuous(v):
+            if is_variable_continuous(v):
                 to_remove.append(v)
 
         for v in to_remove:
@@ -210,36 +209,40 @@ class NetworkBuilder:
             self._jnetwork.getLinks().add(l)
 
 
-class Network:
-    @staticmethod
-    def is_variable_discrete(v):
-        return v.getValueType() == bayesServer.VariableValueType.DISCRETE
+def is_variable_discrete(v):
+    return v.getValueType() == bayesServer.VariableValueType.DISCRETE
 
-    @staticmethod
-    def is_variable_continuous(v):
-        return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
 
-    @staticmethod
-    def save(network, path):
-        from xml.dom import minidom
-        nt = network.saveToString()
-        reparsed = minidom.parseString(nt)
-        with open(path, 'w') as fh:
-            fh.write(reparsed.toprettyxml(indent="  "))
+def is_variable_continuous(v):
+    return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
 
-    @staticmethod
-    def remove_continuous_nodes(network):
-        n = network.copy()
-        to_remove = []
-        for v in n.getVariables():
-            if Network.is_variable_continuous(v):
-                to_remove.append(v)
 
-        for v in to_remove:
-            node = v.getNode()
-            n.getNodes().remove(node)
+def remove_continuous_nodes(network):
+    n = network.copy()
+    to_remove = []
+    for v in n.getVariables():
+        if is_variable_continuous(v):
+            to_remove.append(v)
 
-        return n
+    for v in to_remove:
+        node = v.getNode()
+        n.getNodes().remove(node)
+
+    return n
+
+
+def save(network, path):
+    from xml.dom import minidom
+    nt = network.saveToString()
+    reparsed = minidom.parseString(nt)
+    with open(path, 'w') as fh:
+        fh.write(reparsed.toprettyxml(indent="  "))
+
+
+def is_cluster_variable(v):
+    if not isinstance(v, str):
+        v = v.getName()
+    return v == "Cluster" or v.startswith("Cluster_")
 
 
 class DataStore:
@@ -252,7 +255,10 @@ class DataStore:
     def write(self, data):
         data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
 
+
 import logging
+
+
 class NetworkFactory:
     def __init__(self, data, logger) -> object:
         self._logger = logger

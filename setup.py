@@ -8,5 +8,5 @@ setup(
     license='',
     author='morganics',
     author_email='',
-    description='', requires=['pandas', 'sqlalchemy', 'networkx', 'numpy', 'jpype']
+    description='', requires=['pandas', 'sqlalchemy', 'networkx', 'numpy', 'jpype', 'matplotlib', 'seaborn']
 )
