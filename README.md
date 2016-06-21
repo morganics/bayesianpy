@@ -13,18 +13,17 @@ logger.setLevel(logging.DEBUG)
 auto = bayespy.data.AutoType(titanic)
 
 # create the network factory that can be used to instantiate new networks
-network_factory = bayespy.network.NetworkFactory(titanic, logger)
+with bayespy.network.NetworkFactory(titanic, logger) as network_factory:
+    # create the insight model
+    insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())],         continuous=titanic[list(auto.get_continuous_variables())])
 
-# create the insight model
-insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())],         continuous=titanic[list(auto.get_continuous_variables())])
+    # iterate over the best combination of variables by assessing lots of combinations of comparison queries
+    results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
 
-# iterate over the best combination of variables by assessing lots of combinations of comparison queries
-results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
+    # results here is a list of dicts, containing the keys: probability (the percentage of cases that the model accounts for), model (the trained model), evidence (the names of the variable+states).
 
-# results here is a list of dicts, containing the keys: probability (the percentage of cases that the model accounts for), model (the trained model), evidence (the names of the variable+states). 
-
-sorted_combos = sorted(top_variable_combinations, key=lambda x: x['probability'], reverse=True)
-top_combos = [(sc['evidence'], sc['probability']) for sc in sorted_combos if sc['probability'] > 0.89]
+    sorted_combos = sorted(top_variable_combinations, key=lambda x: x['probability'], reverse=True)
+    top_combos = [(sc['evidence'], sc['probability']) for sc in sorted_combos if sc['probability'] > 0.89]
 ```
 
 # Namespaces
