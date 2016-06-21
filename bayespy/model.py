@@ -114,7 +114,6 @@ class NetworkModel:
 
     def __init__(self, data, jnetwork, datastore):
         self._jnetwork = jnetwork
-        self._table = datastore.uuid
         self._factory = bayesServerInference.RelevanceTreeInferenceFactory()
 
         self._inference = self._factory.createInferenceEngine(jnetwork)
@@ -125,13 +124,13 @@ class NetworkModel:
 
         self._data = data
 
-    def _get_connection(self):
-        return "jdbc:sqlite:{}.db".format(self._jnetwork.getName())
+    def get_network(self):
+        return self._jnetwork
 
     def _get_datareadercommand(self, indexes):
         #print("select * from {} where ix in ({})".format(table, ",".join(str(i) for i in indexes)))
         dataReaderCommand = bayesServer.data.DatabaseDataReaderCommand(
-                self._get_connection(),
+                self._datastore.get_connection(),
                 "select * from {} where ix in ({})".format(self._datastore.table, ",".join(str(i) for i in indexes)))
 
         return dataReaderCommand

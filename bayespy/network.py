@@ -69,7 +69,7 @@ class NetworkBuilder:
 
         if not discrete.empty:
             for d_name in discrete.columns:
-                d = self._create_discrete_variable(discrete, d_name, discrete[d_name].unique())
+                d = self._create_discrete_variable(discrete, d_name, discrete[d_name].dropna().unique())
                 self._create_link(parent, d)
 
     def export(self, path):
@@ -138,7 +138,7 @@ class NetworkBuilder:
             if DataFrame.is_bool(data[node_name].dtype):
                 v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
                 for state in v.getStates():
-                    state.setValue(bool(state.getName()))
+                    state.setValue(state.getName() == 'True')
 
         self._jnetwork.getNodes().add(n_)
 
@@ -208,7 +208,6 @@ class NetworkBuilder:
             l = bayesServer.Link(parent, node)
             self._jnetwork.getLinks().add(l)
 
-
 def is_variable_discrete(v):
     return v.getValueType() == bayesServer.VariableValueType.DISCRETE
 
@@ -230,6 +229,17 @@ def remove_continuous_nodes(network):
 
     return n
 
+def get_number_of_states(network, variable):
+    v = network.getVariables().get(variable)
+    return len(v.getStates())
+
+def get_other_states_from_variable(network, target):
+    target_ = network.getVariables().get(target.variable)
+    for st in target_.getStates():
+        if st.getName() == str(target.state):
+            continue
+
+        yield state(target.variable, st.getName())
 
 def save(network, path):
     from xml.dom import minidom
@@ -246,13 +256,24 @@ def is_cluster_variable(v):
 
 
 class DataStore:
-    def __init__(self):
-        self.uuid = str(uuid.getnode())
-        filename = 'sqlite:///{}.db'.format(self.uuid)
+    def __init__(self, logger):
+        self.uuid = str(uuid.uuid4()).replace("-","")
+        self._create_folder()
+        filename = 'sqlite:///./db/{}.db'.format(self.uuid)
         self._engine = create_engine(filename)
         self.table = "table_" + self.uuid
+        self._logger = logger
+
+    def get_connection(self):
+        return "jdbc:sqlite:./db/{}.db".format(self.uuid)
+
+    def _create_folder(self):
+        directory = "./db/"
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
     def write(self, data):
+        self._logger.debug("Writing {} rows to storage".format(len(data)))
         data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
 
 
@@ -262,7 +283,7 @@ import logging
 class NetworkFactory:
     def __init__(self, data, logger) -> object:
         self._logger = logger
-        ds = DataStore()
+        ds = DataStore(logger)
         ds.write(data)
         self._datastore = ds
         self._data = data

@@ -44,10 +44,10 @@ auto = bayespy.data.AutoType(titanic)
 network_factory = bayespy.network.NetworkFactory(titanic, logger)
 
 # create the insight model
-insight = bayespy.insight.AutoInsight(network_factory, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
+insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
 
 # iterate over the best combination of variables by assessing lots of combinations of comparison queries
-results = insight.query(bayespy.network.Discrete("Survived", "0"))
+results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
 
 base_evidence_false = insight.rationalise(results, num=6)
 
