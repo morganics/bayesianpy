@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 import uuid
 from bayespy.jni import *
 from bayespy.data import DataFrame
-
+import shutil
 from bayespy.model import NetworkModel
 
 
@@ -258,24 +258,27 @@ def is_cluster_variable(v):
 class DataStore:
     def __init__(self, logger):
         self.uuid = str(uuid.uuid4()).replace("-","")
+        self._db_dir = "./db/"
         self._create_folder()
-        filename = 'sqlite:///./db/{}.db'.format(self.uuid)
+        filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, self.uuid))
         self._engine = create_engine(filename)
         self.table = "table_" + self.uuid
         self._logger = logger
 
     def get_connection(self):
-        return "jdbc:sqlite:./db/{}.db".format(self.uuid)
+        return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, self.uuid))
 
     def _create_folder(self):
-        directory = "./db/"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        if not os.path.exists(self._db_dir):
+            os.makedirs(self._db_dir)
 
     def write(self, data):
         self._logger.debug("Writing {} rows to storage".format(len(data)))
         data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
 
+    def cleanup(self):
+        self._logger.debug("Cleaning up: deleting db folder")
+        shutil.rmtree(self._db_dir)
 
 import logging
 
@@ -314,3 +317,12 @@ class NetworkFactory:
         pl = NetworkModel(self._data, network, self._datastore)
         pl.train(train_indexes)
         return pl
+
+    def cleanup(self):
+        self._datastore.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.cleanup()

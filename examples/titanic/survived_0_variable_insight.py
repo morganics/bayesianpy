@@ -41,70 +41,70 @@ logger.setLevel(logging.DEBUG)
 auto = bayespy.data.AutoType(titanic)
 
 # create the network factory that can be used to instantiate networks
-network_factory = bayespy.network.NetworkFactory(titanic, logger)
+with bayespy.network.NetworkFactory(titanic, logger) as network_factory:
 
-# create the insight model
-insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
+    # create the insight model
+    insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
 
-# iterate over the best combination of variables by assessing lots of combinations of comparison queries
-results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
+    # iterate over the best combination of variables by assessing lots of combinations of comparison queries
+    results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
 
-base_evidence_false = insight.rationalise(results, num=6)
+    base_evidence_false = insight.rationalise(results, num=6)
 
-# get unique set of best variables
-bef_set = set(el[0] for el in base_evidence_false)
+    # get unique set of best variables
+    bef_set = set(el[0] for el in base_evidence_false)
 
-import numpy as np
-import matplotlib.pyplot as plt
+    import numpy as np
+    import matplotlib.pyplot as plt
 
-import math
-import matplotlib.mlab as mlab
-#import uuid
-import seaborn as sns
+    import math
+    import matplotlib.mlab as mlab
+    #import uuid
+    import seaborn as sns
 
-# plot the most significant results, where continuous results will have the most significant states highlighted.
-for r in results:
-    model = r['model']
-    for item in r['evidence']:
-        if item not in bef_set:
-            continue
+    # plot the most significant results, where continuous results will have the most significant states highlighted.
+    for r in results:
+        model = r['model']
+        for item in r['evidence']:
+            if item not in bef_set:
+                continue
 
-        if bayespy.network.is_cluster_variable(item):
-            fig1 = plt.figure()
-            ax = fig1.add_subplot(211)
-            node = bayespy.network.Discrete.fromstring(item)
-            v_name = node.variable.replace("Cluster_","")
-            min_x = titanic[v_name].min()
-            max_x = titanic[v_name].max()
-            step = int((max_x - min_x) / 150)
+            if bayespy.network.is_cluster_variable(item):
+                fig1 = plt.figure()
+                ax = fig1.add_subplot(211)
+                node = bayespy.network.Discrete.fromstring(item)
+                v_name = node.variable.replace("Cluster_","")
+                min_x = titanic[v_name].min()
+                max_x = titanic[v_name].max()
+                step = int((max_x - min_x) / 150)
 
-            if step == 0:
-                step = 2
+                if step == 0:
+                    step = 2
 
-            for i in range(3):
-                color = "b"
-                if "Cluster{}".format(i) in item:
-                    color = "r"
+                for i in range(3):
+                    color = "b"
+                    if "Cluster{}".format(i) in item:
+                        color = "r"
 
-                state = "Cluster{}".format(i)
-                e = bayespy.network.Discrete(node.variable, state)
-                #(d, c) = insight.evidence_query(model=model, base_evidence=[bayespy.state("vds", "1")], new_evidence=[bayespy.state("vds", "0")])
-                (d, c) = insight.evidence_query(model=model, new_evidence=[e.tostring()])
-                mu = c[c.variable == e.variable.replace("Cluster_", "")].iloc[0]['mean']
-                sigma = math.sqrt(c[c.variable == e.variable.replace("Cluster_", "")].iloc[0]['variance'])
-                x = np.linspace(min_x, max_x, num=150)
-                ax.plot(x,mlab.normpdf(x, mu, sigma), color=color)
+                    state = "Cluster{}".format(i)
+                    e = bayespy.network.Discrete(node.variable, state)
+                    #(d, c) = insight.evidence_query(model=model, base_evidence=[bayespy.state("vds", "1")], new_evidence=[bayespy.state("vds", "0")])
+                    (d, c) = insight.evidence_query(model=model, new_evidence=[e.tostring()])
+                    mu = c[c.variable == e.variable.replace("Cluster_", "")].iloc[0]['mean']
+                    sigma = math.sqrt(c[c.variable == e.variable.replace("Cluster_", "")].iloc[0]['variance'])
+                    x = np.linspace(min_x, max_x, num=150)
+                    ax.plot(x,mlab.normpdf(x, mu, sigma), color=color)
+                    ax.set_xlim([min_x - step, max_x + step])
+                ax.set_title(v_name)
+                ax = fig1.add_subplot(212)
+
+                sns.distplot(titanic[titanic.Survived == 0][v_name].dropna(), ax=ax, bins=range(int(min_x), int(max_x), step))
+                sns.distplot(titanic[titanic.Survived == 1][v_name].dropna(), ax=ax, bins=range(int(min_x), int(max_x), step))
+
                 ax.set_xlim([min_x - step, max_x + step])
-            ax.set_title(v_name)
-            ax = fig1.add_subplot(212)
-
-            sns.distplot(titanic[titanic.Survived == 0][v_name].dropna(), ax=ax, bins=range(int(min_x), int(max_x), step))
-            sns.distplot(titanic[titanic.Survived == 1][v_name].dropna(), ax=ax, bins=range(int(min_x), int(max_x), step))
-
-            ax.set_xlim([min_x - step, max_x + step])
-            #plt.savefig("..\\plots\\auto\\{}_{}.png".format(v_name, uuid.uuid4()))
-        else:
-            n = bayespy.network.Discrete.fromstring(item)
-            plt.figure()
-            sns.countplot(x=n.variable, hue='Survived', data=titanic)
-            #plt.savefig("..\\plots\\auto\\{}.{}_{}.png".format(n.variable, n.state, uuid.uuid4()))
+                #plt.savefig("..\\plots\\auto\\{}_{}.png".format(v_name, uuid.uuid4()))
+            else:
+                n = bayespy.network.Discrete.fromstring(item)
+                plt.figure()
+                sns.countplot(x=n.variable, hue='Survived', data=titanic)
+                #plt.savefig("..\\plots\\auto\\{}.{}_{}.png".format(n.variable, n.state, uuid.uuid4()))
