@@ -5,7 +5,7 @@ from bayespy.jni import *
 from bayespy.data import DataFrame
 import shutil
 from bayespy.model import NetworkModel
-
+import os
 
 def create_network():
     return bayesServer.Network(str(uuid.getnode()))
@@ -215,6 +215,8 @@ def is_variable_discrete(v):
 def is_variable_continuous(v):
     return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
 
+def get_variable(network, variable_name):
+    return network.getVariables().get(variable_name)
 
 def remove_continuous_nodes(network):
     n = network.copy()
@@ -256,9 +258,9 @@ def is_cluster_variable(v):
 
 
 class DataStore:
-    def __init__(self, logger):
+    def __init__(self, logger, db_folder):
         self.uuid = str(uuid.uuid4()).replace("-","")
-        self._db_dir = "./db/"
+        self._db_dir = os.path.join(db_folder, "db")
         self._create_folder()
         filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, self.uuid))
         self._engine = create_engine(filename)
@@ -284,9 +286,9 @@ import logging
 
 
 class NetworkFactory:
-    def __init__(self, data, logger) -> object:
+    def __init__(self, data, db_folder, logger) -> object:
         self._logger = logger
-        ds = DataStore(logger)
+        ds = DataStore(logger, db_folder)
         ds.write(data)
         self._datastore = ds
         self._data = data

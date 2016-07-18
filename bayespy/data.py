@@ -14,19 +14,23 @@ class DataFrameReader:
     def reset(self):
         self._iterator = self._df.itertuples()
 
+    def get_index(self):
+        return self._row[0]
+
     def __getitem__(self, key):
         # the df index of the row is at index 0
         ix = self._columns.index(key) + 1
         return self._row[ix]
 
 class AutoType:
-    def __init__(self, df):
+    def __init__(self, df, continuous_to_discrete_limit = 20):
         self._df = df
+        self._continuous_to_discrete_limit = continuous_to_discrete_limit
 
     def get_continuous_variables(self):
         cols = self._df.dtypes[(self._df.dtypes != "object") & (self._df.dtypes != "bool")].index.tolist()
         for col in cols:
-            if len(self._df[col].unique()) > 20:
+            if len(self._df[col].unique()) > self._continuous_to_discrete_limit:
                 yield col
 
     def get_discrete_variables(self):
