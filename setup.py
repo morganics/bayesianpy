@@ -9,5 +9,5 @@ setup(
     author='morganics',
     author_email='',
     description='', 
-	install_requires=['pandas', 'sqlalchemy', 'networkx', 'numpy', 'jpype1', 'matplotlib', 'seaborn']
+	install_requires=['pandas', 'sqlalchemy', 'networkx', 'numpy', 'jpype1', 'seaborn']
 )
