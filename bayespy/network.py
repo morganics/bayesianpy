@@ -37,6 +37,64 @@ class Discrete:
         return Discrete(*text.split(STATE_DELIMITER))
 
 
+
+
+class Builder:
+
+    def get_variable(network, variable):
+        return network.getVariables().get(variable)
+
+    def create_link(network, n1, n2, t=None):
+        if isinstance(n1, str):
+            n1 = Builder.get_variable(n1)
+
+        if isinstance(n1, str):
+            n2 = Builder.get_variable(n2)
+
+        if t is not None:
+            l = bayesServer.Link(n1, n2, t)
+        else:
+            l = bayesServer.Link(n1, n2)
+
+        network.getLinks().add(l)
+
+    def create_continuous_variable(network, node_name):
+        v = bayesServer.Variable(node_name, bayesServer.VariableValueType.CONTINUOUS)
+        n_ = bayesServer.Node(v)
+        network.getNodes().add(n_)
+        return n_
+
+    def create_cluster_variable(network, num_states):
+        v = bayesServer.Variable("Cluster")
+        parent = bayesServer.Node(v)
+        for i in range(num_states):
+            v.getStates().add(bayesServer.State("Cluster{}".format(i)))
+
+        network.getNodes().add(parent)
+        return parent
+
+    def create_discrete_variable(network, data, node_name, states):
+        v = bayesServer.Variable(node_name)
+        n_ = bayesServer.Node(v)
+
+        for s in states:
+            v.getStates().add(bayesServer.State(str(s)))
+
+        if node_name in data.columns.tolist():
+            if DataFrame.is_int(data[node_name].dtype):
+                v.setStateValueType(bayesServer.StateValueType.INTEGER)
+                for state in v.getStates():
+                    state.setValue(jp.java.lang.Integer(state.getName()))
+
+            if DataFrame.is_bool(data[node_name].dtype):
+                v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
+                for state in v.getStates():
+                    state.setValue(state.getName() == 'True')
+
+        network.getNodes().add(n_)
+
+        return n_
+
 class NetworkBuilder:
     def __init__(self, jnetwork):
         self._jnetwork = jnetwork
@@ -49,11 +107,6 @@ class NetworkBuilder:
         self._add_nodes(discrete=discrete, continuous=continuous)
         parent = self._create_parent(latent_states=latent_states, parent_node=parent_node)
         self._create_links(parent)
-
-    def build_temporal_mixture_of_gaussians(self, continuous=pd.DataFrame(), network_time_slices=[1, 2]):
-        node = self._create_multivariate_continuous_node("Variables", continuous.columns.tolist(), is_temporal=True)
-        for i in network_time_slices:
-            self._create_link(node, node, i)
 
     def build_naive_network_with_latent_parents(self, discrete=pd.DataFrame(), continuous=pd.DataFrame(),
                                                 latent_states=None):
@@ -211,7 +264,6 @@ class NetworkBuilder:
 def is_variable_discrete(v):
     return v.getValueType() == bayesServer.VariableValueType.DISCRETE
 
-
 def is_variable_continuous(v):
     return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
 
@@ -278,45 +330,52 @@ class DataStore:
         self._logger.debug("Writing {} rows to storage".format(len(data)))
         data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
 
+        self._logger.debug("Finished writing {} rows to storage".format(len(data)))
+
     def cleanup(self):
         self._logger.debug("Cleaning up: deleting db folder")
         shutil.rmtree(self._db_dir)
 
-import logging
-
-
 class NetworkFactory:
-    def __init__(self, data, db_folder, logger) -> object:
+    def __init__(self, data, db_folder, logger, network_file_path = None) -> object:
         self._logger = logger
-        ds = DataStore(logger, db_folder)
-        ds.write(data)
-        self._datastore = ds
         self._data = data
+        self._network_file_path = network_file_path
+        self._db_folder = db_folder
 
-    def create_default_logger(name, handler=logging.StreamHandler(), loglevel=logging.DEBUG):
-        logger = logging.getLogger(name)
-        logger.addHandler(handler)
-        logger.setLevel(loglevel)
+    def reset_dataframe(self, df):
+        self._data = df
 
-        return logger
+    def _write_data(self):
+        ds = DataStore(self._logger, self._db_folder)
+        ds.write(self._data)
+        self._datastore = ds
+
+    def get_datastore(self):
+        return self._datastore
+
+    def get_data(self):
+        return self._data
+
+    def create_from_file(self, path):
+        return create_network_from_file(path)
+
+    def create(self):
+        if self._network_file_path is None:
+            return create_network()
+        else:
+            self.create_from_file(self._network_file_path)
 
     def create_network(self) -> (object, NetworkBuilder):
         network = create_network()
         nb = NetworkBuilder(network)
         return (network, nb)
 
-    def create(self, continuous=[], discrete=[], func=None):
-        network = create_network()
-        nb = NetworkBuilder(network)
-        if func is None:
-            nb.create_naive_network(discrete=self._data[discrete], continuous=self._data[continuous], latent_states=10)
-        else:
-            func(discrete=self._data[discrete], continuous=self._data[continuous], latent_states=10)
-
-        return network
+    def create_network_builder(self, network):
+        return NetworkBuilder(network)
 
     def create_trained_model(self, network, train_indexes):
-        pl = NetworkModel(self._data, network, self._datastore)
+        pl = NetworkModel(self._data, network, self._datastore, self._logger)
         pl.train(train_indexes)
         return pl
 
@@ -324,6 +383,7 @@ class NetworkFactory:
         self._datastore.cleanup()
 
     def __enter__(self):
+        self._write_data()
         return self
 
     def __exit__(self, type, value, traceback):

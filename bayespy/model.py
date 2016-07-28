@@ -106,33 +106,18 @@ class Evidence:
 
                 self._evidence.set(v, jp.java.lang.Double(value[1]))
 
-class TemporalNetworkModel:
-
-    def __init__(self, data, jnetwork, datastore):
-        self._jnetwork = jnetwork
-        self._table = datastore.uuid
-        self._factory = bayesServerInference.RelevanceTreeInferenceFactory()
-
-        self._inference = self._factory.createInferenceEngine(jnetwork)
-        self._queryOptions = self._factory.createQueryOptions()
-        self._queryOutput = self._factory.createQueryOutput()
-
-        self._datastore = datastore
-
-        self._data = data
-
 class NetworkModel:
 
-    def __init__(self, data, jnetwork, datastore):
-        self._jnetwork = jnetwork
+    def __init__(self, data, network, datastore, logger):
+        self._jnetwork = network
         self._factory = bayesServerInference.RelevanceTreeInferenceFactory()
 
-        self._inference = self._factory.createInferenceEngine(jnetwork)
+        self._inference = self._factory.createInferenceEngine(network)
         self._queryOptions = self._factory.createQueryOptions()
         self._queryOutput = self._factory.createQueryOutput()
 
         self._datastore = datastore
-
+        self._logger = logger
         self._data = data
 
     def get_network(self):
@@ -186,7 +171,7 @@ class NetworkModel:
             fh.write(reparsed.toprettyxml(indent="  "))
 
 
-    def train(self, indexes):
+    def train(self, indexes=None):
         """
         Train a model on data provided in the constructor
         :param indexes: the 'training' indexes, if using KFold cross validation etc.
@@ -195,6 +180,9 @@ class NetworkModel:
         learning = bayesServerParams.ParameterLearning(self._jnetwork, bayesServerInference.RelevanceTreeInferenceFactory())
         learningOptions = bayesServerParams.ParameterLearningOptions()
         #learningOptions.setCalculateStatistics(True)
+
+        if indexes is None:
+            indexes = self._data.index.tolist()
 
         dataReaderCommand = self._get_datareadercommand(indexes)
 
@@ -211,72 +199,123 @@ class NetworkModel:
                     'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
                     'BIC': result.getBIC().floatValue()}
 
-    def predict(self, indexes, targets=[]):
-        """
-        Predict the output class given the trained model.
-        :param indexes: Testing indexes (if using cross validation etc)
-        :param targets: A list of target variables that are being queried
-        :return: The list of target variables with probabilities/ states given the testing data
-        """
-        self._queryOptions.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
-        dataReaderCommand = self._get_datareadercommand(indexes)
+    def batch_query(self, queries=[]):
 
-        target_nodes = []
-        for target_node in targets:
-            v = self._jnetwork.getVariables().get(target_node)
-            if bayespy.network.is_variable_continuous(v):
-                n = bayesServer.CLGaussian(v)
-            else:
-                n = bayesServer.Table(v)
+        data_reader_cmd = self._get_datareadercommand(self._data.index.tolist())
 
+        data_reader = data_reader_cmd.executeReader()
+        reader_options = bayesServer.data.ReaderOptions("ix")
+        variable_refs = list(self._create_variablereferences(self._data))
+        reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
 
-            self._inference.getQueryDistributions().add(bayesServerInference.QueryDistribution(n));
-            target_nodes.append((v, n))
-
-        dataReader = dataReaderCommand.executeReader()
-        readerOptions = bayesServer.data.ReaderOptions()
-        variableRefs = list(self._create_variablereferences(self._data))
-        reader = bayesServer.data.DefaultEvidenceReader(dataReader, jp.java.util.Arrays.asList(variableRefs), readerOptions)
-
-        results = defaultdict(list)
+        i = 0
+        results = []
         while reader.read(self._inference.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
             try:
+                self._queryOptions.setLogLikelihood(True)
                 self._inference.query(self._queryOptions, self._queryOutput)
             except BaseException as e:
                 print(e)
 
-            for v, target in target_nodes:
-                if bayespy.network.is_variable_continuous(v):
-                    #continuous
-                    results[v.getName()].append(target.getMean(v))
-                else:
-                    # discrete
-                    states = {}
+            loglikelihood = self._queryOutput.getLogLikelihood()
+            caseId = reader.getReadInfo().getCaseId()
+            #self._data.set_value(caseId, 'loglikelihood', loglikelihood)
 
-                    for state in v.getStates():
-                        states.update({ state.getName() : target.get([state])})
+            results.append({ 'caseid': caseId.value, 'loglikelihood': loglikelihood.value})
 
-                    max_state = max(states.keys(), key=(lambda key: states[key]))
-                    if DataFrame.is_int(self._data[v.getName()].dtype):
-                        max_state = int(max_state)
+            if i % 500 == 0:
+                self._logger.debug("Queried case {}".format(i))
 
-                    states.update({'MaxStateLikelihood': max_state})
-
-                    results[v.getName()].append(states)
+            i += 1
+            # for v, target in target_nodes:
+            #     if bayespy.network.is_variable_continuous(v):
+            #         #continuous
+            #         results[v.getName()].append(target.getMean(v))
+            #     else:
+            #         # discrete
+            #         states = {}
+            #
+            #         for state in v.getStates():
+            #             states.update({ state.getName() : target.get([state])})
+            #
+            #         max_state = max(states.keys(), key=(lambda key: states[key]))
+            #         if DataFrame.is_int(self._data[v.getName()].dtype):
+            #             max_state = int(max_state)
+            #
+            #         states.update({'MaxStateLikelihood': max_state})
+            #
+            #         results[v.getName()].append(states)
 
 
             self._inference.getEvidence().clear()
 
         reader.close()
-        dataReader.close()
-        return {k:pd.DataFrame(v) for k,v in results.items()}
+        data_reader.close()
 
-    def fit(self, data):
-        return self.train(data)
+        df = pd.DataFrame(results)
+        all_results = self._data.join(df.set_index('caseid'))
 
-    def transform(self, data, targets=[]):
-        return self.predict(self, data, targets)
+        return all_results
 
+    # def predict(self, indexes, targets=[]):
+    #     """
+    #     Predict the output class given the trained model.
+    #     :param indexes: Testing indexes (if using cross validation etc)
+    #     :param targets: A list of target variables that are being queried
+    #     :return: The list of target variables with probabilities/ states given the testing data
+    #     """
+    #     self._queryOptions.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+    #     dataReaderCommand = self._get_datareadercommand(indexes)
+    #
+    #     target_nodes = []
+    #     for target_node in targets:
+    #         v = self._jnetwork.getVariables().get(target_node)
+    #         if bayespy.network.is_variable_continuous(v):
+    #             n = bayesServer.CLGaussian(v)
+    #         else:
+    #             n = bayesServer.Table(v)
+    #
+    #
+    #         self._inference.getQueryDistributions().add(bayesServerInference.QueryDistribution(n));
+    #         target_nodes.append((v, n))
+    #
+    #     dataReader = dataReaderCommand.executeReader()
+    #     readerOptions = bayesServer.data.ReaderOptions()
+    #     variableRefs = list(self._create_variablereferences(self._data))
+    #     reader = bayesServer.data.DefaultEvidenceReader(dataReader, jp.java.util.Arrays.asList(variableRefs), readerOptions)
+    #
+    #     results = defaultdict(list)
+    #     while reader.read(self._inference.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
+    #         try:
+    #             self._inference.query(self._queryOptions, self._queryOutput)
+    #         except BaseException as e:
+    #             print(e)
+    #
+    #         for v, target in target_nodes:
+    #             if bayespy.network.is_variable_continuous(v):
+    #                 #continuous
+    #                 results[v.getName()].append(target.getMean(v))
+    #             else:
+    #                 # discrete
+    #                 states = {}
+    #
+    #                 for state in v.getStates():
+    #                     states.update({ state.getName() : target.get([state])})
+    #
+    #                 max_state = max(states.keys(), key=(lambda key: states[key]))
+    #                 if DataFrame.is_int(self._data[v.getName()].dtype):
+    #                     max_state = int(max_state)
+    #
+    #                 states.update({'MaxStateLikelihood': max_state})
+    #
+    #                 results[v.getName()].append(states)
+    #
+    #
+    #         self._inference.getEvidence().clear()
+    #
+    #     reader.close()
+    #     dataReader.close()
+    #     return {k:pd.DataFrame(v) for k,v in results.items()}
 
 
 

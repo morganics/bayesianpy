@@ -3,6 +3,7 @@ from bayespy import insight
 #from bayespy import ml
 from bayespy import model
 from bayespy import network
+from bayespy import template
 #from bayespy import visual
 from bayespy.jni import bayesServer as _bs
 from bayespy import utils
