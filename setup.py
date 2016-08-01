@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='bayespy',
-    version='0.01',
+    version='0.1',
     packages=['bayespy'],
     url='',
     license='',

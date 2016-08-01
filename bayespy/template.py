@@ -25,7 +25,6 @@ class MixtureNaiveBayes(Template):
 
         if not self._discrete.empty:
             for d_name in self._discrete.columns:
-                print(self._discrete[d_name].dropna().unique())
                 if d_name in self._discrete_states:
                     states = self._discrete_states[d_name]
                 else:

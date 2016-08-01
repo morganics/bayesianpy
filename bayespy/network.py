@@ -241,8 +241,6 @@ class NetworkBuilder:
                 n_ = bayesServer.Node(v)
                 self._jnetwork.getNodes().add(n_)
 
-        [print(v.getName()) for v in self._jnetwork.getVariables()]
-
     def remove_continuous_nodes(self):
         to_remove = []
         for v in self._jnetwork.getVariables():
