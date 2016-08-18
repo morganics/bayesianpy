@@ -12,6 +12,11 @@ classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin
                               os.path.join(path_to_package, 'bin/sqlite-jdbc-3.8.11.2.jar'))
 if not jp.isJVMStarted():
     jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath))
+
+    # so it doesn't crash if called by a Python thread.
+    if not jp.isThreadAttachedToJVM():
+        jp.attachThreadToJVM()
+
     bayesServer = jp.JPackage("com.bayesserver")
     sqlLite = jp.JPackage("org.sqlite.JDBC")
     bayesServerInference = jp.JPackage("com.bayesserver.inference")
