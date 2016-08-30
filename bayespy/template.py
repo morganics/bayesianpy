@@ -38,6 +38,7 @@ class MixtureNaiveBayes(Template):
 
                 c = builder.create_discrete_variable(network, self._discrete, d_name, states)
                 builder.create_link(network, cluster, c)
+                
 
         return network
 
