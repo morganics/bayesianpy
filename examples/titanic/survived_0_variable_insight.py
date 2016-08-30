@@ -45,12 +45,23 @@ target = bayespy.network.Discrete("Survived", 0)
 
 
 # create the network factory that can be used to instantiate networks
-with bayespy.network.NetworkFactory(titanic, logger, db_folder) as network_factory:
+with bayespy.network.NetworkFactory(titanic, db_folder, logger) as network_factory:
     # create the insight model
-    insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
-    models = insight.create_model_cache(target, times=5)
-    print(insight.query_bivariate_combinations(target, models=models, top=10))
-    print(insight.query_exclusive_states(target, models=models, top=10))
+    tpl = bayespy.template.DiscretisedMixtureNaiveBayes(network_factory,
+        discrete=titanic[list(auto.get_discrete_variables())],
+        continuous=titanic[list(auto.get_continuous_variables())])
 
-    combinations = list(insight.query_top_variable_combinations_as_df(target, models=models, top=4))
-    print(combinations)
+    insight = bayespy.insight.AutoInsight(tpl, target, logger)
+
+
+    #bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())], continuous=titanic[list(auto.get_continuous_variables())])
+    print(insight.get_exclusive_states())
+    print(insight.get_insightful_states())
+    print(insight.get_descriptive_combinations())
+    #print(insight.get_most_common_tuples())
+    #models = insight.create_model_cache(target, times=5)
+    #print(insight.query_bivariate_combinations(target, models=models, top=10))
+    #print(insight.query_exclusive_states(target, models=models, top=10))
+
+    #combinations = list(insight.query_top_variable_combinations_as_df(target, models=models, top=4))
+    #print(combinations)

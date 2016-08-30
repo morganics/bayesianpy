@@ -6,9 +6,14 @@ class DataFrameReader:
         self._row = None
         self._columns = df.columns.tolist()
         self.reset()
+        self.row_index = 0
+
+    def __getattr__(self, key):
+        return self.__getitem__(key)
 
     def read(self):
         self._row = next(self._iterator, None)
+        self.row_index += 1
         return self._row is not None
 
     def reset(self):
@@ -17,10 +22,25 @@ class DataFrameReader:
     def get_index(self):
         return self._row[0]
 
+    def to_dict(self):
+        return self.row()
+
+    def row(self):
+        return {c : self.__getitem__(c) for c in self._columns}
+
     def __getitem__(self, key):
         # the df index of the row is at index 0
-        ix = self._columns.index(key) + 1
-        return self._row[ix]
+        try:
+            ix = self._columns.index(key) + 1
+            return self._row[ix]
+        except BaseException as e:
+            return None
+
+    def __next__(self):
+        if self.read():
+            return self
+        else:
+            raise StopIteration
 
 class AutoType:
     def __init__(self, df, continuous_to_discrete_limit = 20):

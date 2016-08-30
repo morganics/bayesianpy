@@ -20,4 +20,6 @@ if not jp.isJVMStarted():
     bayesServer = jp.JPackage("com.bayesserver")
     sqlLite = jp.JPackage("org.sqlite.JDBC")
     bayesServerInference = jp.JPackage("com.bayesserver.inference")
+    bayesServerAnalysis = jp.JPackage("com.bayesserver.analysis")
     bayesServerParams = jp.JPackage("com.bayesserver.learning.parameters")
+    bayesServerDiscovery = jp.JPackage("com.bayesserver.data.discovery")

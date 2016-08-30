@@ -4,9 +4,180 @@ import bayespy.network
 import numpy as np
 from collections import Counter
 import bayespy.data
+import bayespy.jni
+from bayespy.jni import jp
+
+
+class _AutoInsight:
+
+    def __init__(self, network, target, logger):
+        self._network = network
+        self._logger = logger
+        self._target = target
+        self._target_state = bayespy.network.get_state(network, target.variable, target.state)
+        self._target = target
+        (self._inf_engine, _, _) = bayespy.model.InferenceEngine(network).create(retract=False)
+
+    def calculate(self, evidence=[], sort_by=['difference']):
+
+        variables = jp.java.util.Arrays.asList(
+            [v for v in self._network.getVariables() if v.getName() != self._target.variable])
+
+        ai = bayespy.jni.bayesServerAnalysis.AutoInsight
+
+        if len(evidence) > 0:
+            e = bayespy.model.Evidence(self._network, self._inf_engine)
+            evidence_obj = e.apply(evidence)
+            auto_insight_output = ai.calculate(self._target_state, variables,
+                                           bayespy.model.InferenceEngine.inference_factory,
+                                           evidence_obj)
+        else:
+            auto_insight_output = ai.calculate(self._target_state, variables,
+                                               bayespy.model.InferenceEngine.inference_factory)
+
+        results = []
+        for variable in auto_insight_output.getVariableOutputs():
+            variable_name = variable.getVariable().getName()
+
+            if variable_name == "Cluster":
+                continue
+
+            for state in variable.getStateOutputs():
+                results.append({'variable': variable_name, 'state': state.getState().getName(),
+                                'probability': state.getProbability().floatValue(),
+                                'probability_given_target': state.getProbabilityGivenTarget().floatValue(),
+                                'probability_target_given_this': np.nan if state.getProbabilityTargetGivenThis() is None else state.getProbabilityTargetGivenThis().floatValue(),
+                                'difference': state.getDifference().floatValue(),
+                                'lift': np.nan if state.getLift() is None else state.getLift().floatValue()})
+
+        df = pd.DataFrame(results)
+        return df.sort_values(by=sort_by, ascending=False).reset_index().drop('index', axis=1)
 
 
 class AutoInsight:
+    def __init__(self, template, target, logger, comparison_models=3):
+        self._network_template = template
+        self._logger = logger
+        self._data_store = template.get_network_factory().get_datastore()
+        self._model_cache = []
+        self._comparison_model_count = comparison_models
+        self._target = target
+
+    def _create_models(self):
+        if len(self._model_cache) > 0:
+            return self._model_cache
+
+        for i in range(self._comparison_model_count):
+            network = self._network_template.create()
+            model = bayespy.model.NetworkModel(network, self._data_store, self._logger)
+            model.train()
+            model.save(r"C:\Users\imorgan.admin\PycharmProjects\bayespy\examples\titanic\{}.bayes".format(i))
+            self._model_cache.append(_AutoInsight(network, self._target, self._logger))
+
+        return self._model_cache
+
+    def get_most_common_tuples(self, combination_length=2, top=20):
+        models = self._create_models()
+
+        group = 0
+
+        combinations = pd.DataFrame()
+        for model in models:
+            insight = model.calculate()
+            reader = bayespy.data.DataFrameReader(insight)
+            while reader.read():
+                rows = [reader.to_dict()]
+                evidence = [bayespy.network.Discrete(reader.variable, reader.state)]
+                for i in range(combination_length-1):
+                    sub_insight = model.calculate(evidence=evidence)
+                    top_row = sub_insight.iloc[0]
+                    evidence.append(bayespy.network.Discrete(top_row.variable, top_row.state))
+                    d = top_row.to_dict()
+                    d.update({'group': group})
+                    rows.append(d)
+
+                r = pd.DataFrame(rows)
+                r['max_difference'] = r.difference.sum()
+                r['evidence'] = ','.join([str(n) for n in evidence])
+                combinations = combinations.append(r)
+
+                group += 1
+
+        return combinations.groupby(by=['evidence']).mean().sort_values(by=['max_difference'], ascending=False)\
+            .reset_index().drop(['index', 'group'], axis=1).head(top)
+
+    def get_descriptive_combinations(self, top=10):
+        models = self._create_models()
+
+        combinations = pd.DataFrame()
+        for i, model in enumerate(models):
+            rows = []
+            evidence = []
+            for j in range(10):
+                step = model.calculate(evidence=evidence)
+                row = step.iloc[0]
+                evidence.append(bayespy.network.Discrete(row.variable, row.state))
+                d = row.to_dict()
+                d.update({'group': i})
+                rows.append(d)
+                if row.difference < 0.05:
+                    break
+
+            r = pd.DataFrame(rows)
+            r['max_difference'] = r.difference.sum()
+            r['evidence'] = ','.join([str(n) for n in evidence])
+            combinations = combinations.append(r)
+
+        return combinations.sort_values(by=['max_difference']).reset_index()
+
+    def get_exclusive_states(self, top=10):
+        return self.get_insightful_states(using='lift', top=top)
+
+    def get_insightful_states(self, using='difference', top=10):
+        if using not in ['lift', 'difference']:
+            raise ValueError("Expecting either lift or difference in the using parameter. Difference favours probability"
+                             " changes with a higher likelihood of occurring, while lift favours relative changes in probability"
+                             " without taking in to account the likelihood that they will occur.")
+
+        models = self._create_models()
+        rows = pd.DataFrame()
+        for model in models:
+            rows = rows.append(model.calculate(), ignore_index=True)
+
+        return rows.groupby(by=['variable', 'state']).mean().sort_values(by=[using], ascending=False).head(
+            top).reset_index()
+
+
+
+
+
+            #
+            # selected_items = pd.DataFrame(selected_items)
+            # print(selected_items)
+
+    # def get_combinations(self, target):
+    #
+    #     models = self._create_models()
+    #
+    #     for model in
+    #
+    #         evidence = []
+    #         selected_items = []
+    #
+    #         for i in range(10):
+    #             step = a.calculate(evidence=evidence)
+    #             row = step.iloc[x]
+    #             selected_items.append(row.to_dict())
+    #             evidence.append(bayespy.network.Discrete(row.variable, row.state))
+    #             if row.difference < 0.05:
+    #                 break
+    #
+    #         selected_items = pd.DataFrame(selected_items)
+    #         print(selected_items)
+
+
+
+class AutoInsight1:
     def __init__(self, network_factory, logger, continuous=[], discrete=[]):
         self._continuous = continuous
         self._discrete = discrete
@@ -180,11 +351,12 @@ class AutoInsight:
                     av.append(c['mean'])
                     va.append(c['variance'])
 
+                #target_probability = self._get_mean_value_across_models(models, v_, 'target_probability')
                 mc.append((bayespy.network.Discrete(v_.variable, c['state']).tostring(),
-                           {'mean': np.mean(av), 'variance': np.mean(va), 'sum_difference': d}))
+                           {'mean': np.mean(av), 'variance': np.mean(va), 'sum_difference': d, 'target_probability': 0}))
             else:
                 base_probability = self._get_mean_value_across_models(models, v_, 'base_probability')
-                target_probability = self._get_mean_value_across_models(models, v_, 'value')
+                target_probability = self._get_mean_value_across_models(models, v_, 'target_probability')
                 mc.append((v, {'base_probability': base_probability, 'target_probability': target_probability,
                                'sum_difference': d}))
 
@@ -240,18 +412,22 @@ class AutoInsight:
             # get the mean and variance for each of the continuous nodes and which are assumed to be children of the discrete nodes.
             discrete_features['mean'] = 0.0
             discrete_features['variance'] = 0.0
+            discrete_features['target_probability'] = 0.0
 
             dfr = bayespy.data.DataFrameReader(discrete_features)
             while dfr.read():
                 if dfr['variable'] == target.variable or dfr['variable'] == 'Cluster':
                     continue
 
+                (ds, cs) = self.query_model_with_evidence(model=model, new_evidence=[dfr['variable_state']])
                 if bayespy.network.is_cluster_variable(dfr['variable']):
-                    (ds, cs) = self.evidence_query(model=model, new_evidence=[dfr['variable_state']])
                     discrete_features.set_value(dfr.get_index(), 'mean',
                                                 cs[cs.variable == dfr['continuous_variable_name']]['mean'])
                     discrete_features.set_value(dfr.get_index(), 'variance',
                                                 cs[cs.variable == dfr['continuous_variable_name']]['variance'])
+
+                # gets the target value given the particular evidence set on the discrete variable
+                discrete_features.set_value(dfr.get_index(), 'target_probability', ds[(ds.variable == target.variable) & (ds.state == target.state)]['value'])
 
             discrete_features.sort_values(by=['difference'], inplace=True, ascending=False)
 

@@ -7,6 +7,12 @@ class Template:
         self._continuous = continuous
         self._network_factory = network_factory
 
+    def get_network_factory(self):
+        return self._network_factory
+
+    def create(self):
+        pass
+
 class MixtureNaiveBayes(Template):
 
     def __init__(self, network_factory, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, discrete_states={}):
@@ -14,7 +20,7 @@ class MixtureNaiveBayes(Template):
         self._latent_states = latent_states
         self._discrete_states = discrete_states
 
-    def build(self):
+    def create(self):
         network = self._network_factory.create()
         cluster = builder.create_cluster_variable(network, 5)
 
@@ -30,6 +36,29 @@ class MixtureNaiveBayes(Template):
                 else:
                     states = self._discrete[d_name].dropna().unique()
 
+                c = builder.create_discrete_variable(network, self._discrete, d_name, states)
+                builder.create_link(network, cluster, c)
+
+        return network
+
+class DiscretisedMixtureNaiveBayes(Template):
+
+    def __init__(self, network_factory, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10):
+        super().__init__(network_factory, discrete=discrete, continuous=continuous)
+        self._latent_states = latent_states
+
+    def create(self):
+        network = self._network_factory.create()
+        cluster = builder.create_cluster_variable(network, 5)
+
+        if not self._continuous.empty:
+            for c_name in self._continuous.columns:
+                c = builder.create_discretised_variable(network, self._continuous, c_name)
+                builder.create_link(network, cluster, c)
+
+        if not self._discrete.empty:
+            for d_name in self._discrete.columns:
+                states = self._discrete[d_name].dropna().unique()
                 c = builder.create_discrete_variable(network, self._discrete, d_name, states)
                 builder.create_link(network, cluster, c)
 

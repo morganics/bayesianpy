@@ -36,7 +36,8 @@ class Discrete:
     def fromstring(text):
         return Discrete(*text.split(STATE_DELIMITER))
 
-
+    def __str__(self):
+        return self.tostring()
 
 
 class Builder:
@@ -57,6 +58,31 @@ class Builder:
             l = bayesServer.Link(n1, n2)
 
         network.getLinks().add(l)
+
+    def _create_interval_name(interval, decimal_places):
+        title = ""
+        title += "(" if interval.getMinimumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "["
+        title += "{0:.{digits}f},{1:.{digits}f}".format(interval.getMinimum().floatValue(), interval.getMaximum().floatValue(), digits=decimal_places)
+        title += ")" if interval.getMaximumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "]"
+        return title
+
+    def create_discretised_variable(network, data, node_name, bin_count=4, infinite_extremes=True, decimal_places=4):
+        options = bayesServerDiscovery.DiscretizationOptions()
+        options.setInfiniteExtremes(infinite_extremes)
+        options.setSuggestedBinCount(bin_count)
+        values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
+        ef = bayesServerDiscovery.EqualFrequencies()
+
+        intervals = ef.discretize(values, options, jp.JString(node_name))
+
+        v = bayesServer.Variable(node_name, bayesServer.VariableValueType.DISCRETE)
+        v.setStateValueType(bayesServer.StateValueType.DOUBLE_INTERVAL)
+        n = bayesServer.Node(v)
+        for interval in intervals:
+            v.getStates().add(bayesServer.State("{}".format(Builder._create_interval_name(interval, decimal_places)), interval))
+
+        network.getNodes().add(n)
+        return n
 
     def create_continuous_variable(network, node_name):
         v = bayesServer.Variable(node_name, bayesServer.VariableValueType.CONTINUOUS)
@@ -285,6 +311,12 @@ def get_number_of_states(network, variable):
     v = network.getVariables().get(variable)
     return len(v.getStates())
 
+def get_state(network, variable_name, state_name):
+    variable = get_variable(network, variable_name)
+    for jstate in variable.getStates():
+        if jstate.getName() == str(state_name):
+            return jstate
+
 def get_other_states_from_variable(network, target):
     target_ = network.getVariables().get(target.variable)
     for st in target_.getStates():
@@ -308,7 +340,7 @@ def is_cluster_variable(v):
 
 
 class DataStore:
-    def __init__(self, logger, db_folder):
+    def __init__(self, logger, db_folder, dataframe):
         self.uuid = str(uuid.uuid4()).replace("-","")
         self._db_dir = os.path.join(db_folder, "db")
         self._create_folder()
@@ -316,6 +348,7 @@ class DataStore:
         self._engine = create_engine(filename)
         self.table = "table_" + self.uuid
         self._logger = logger
+        self.data = dataframe
 
     def get_connection(self):
         return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, self.uuid))
@@ -324,11 +357,10 @@ class DataStore:
         if not os.path.exists(self._db_dir):
             os.makedirs(self._db_dir)
 
-    def write(self, data):
-        self._logger.debug("Writing {} rows to storage".format(len(data)))
-        data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
-
-        self._logger.debug("Finished writing {} rows to storage".format(len(data)))
+    def write(self):
+        self._logger.debug("Writing {} rows to storage".format(len(self.data)))
+        self.data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
+        self._logger.debug("Finished writing {} rows to storage".format(len(self.data)))
 
     def cleanup(self):
         self._logger.debug("Cleaning up: deleting db folder")
@@ -345,8 +377,8 @@ class NetworkFactory:
         self._data = df
 
     def _write_data(self):
-        ds = DataStore(self._logger, self._db_folder)
-        ds.write(self._data)
+        ds = DataStore(self._logger, self._db_folder, self._data)
+        ds.write()
         self._datastore = ds
 
     def get_datastore(self):
@@ -386,3 +418,4 @@ class NetworkFactory:
 
     def __exit__(self, type, value, traceback):
         self.cleanup()
+        #pass

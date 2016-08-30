@@ -20,6 +20,26 @@ class QueryOutput:
         self.continuous = continuous
         self.discrete = discrete
 
+class InferenceEngine:
+
+    inference_factory = bayesServerInference.RelevanceTreeInferenceFactory()
+
+    def __init__(self, network):
+        self._network = network
+
+    def create(self, loglikelihood=False, conflict=False, retract=True):
+        query_options = self.inference_factory.createQueryOptions()
+        query_output = self.inference_factory.createQueryOutput()
+        inference_engine = self.inference_factory.createInferenceEngine(self._network)
+
+        query_options.setLogLikelihood(loglikelihood)
+        query_options.setConflict(conflict)
+
+        if retract:
+            query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+
+        return inference_engine, query_options, query_output
+
 class Query:
 
     _factory = bayesServerInference.RelevanceTreeInferenceFactory()
@@ -89,8 +109,11 @@ class Evidence:
         """
         for value in evidence:
             if not isinstance(value, tuple):
+                value = str(value)
                 node, state = value.split(bayespy.network.STATE_DELIMITER)
                 v = self._variables.get(node)
+                if v is None:
+                    raise ValueError("Node {} does not exist".format(node))
                 if bayespy.network.is_variable_discrete(v):
                     st = v.getStates().get(state)
                     if st is None:
@@ -106,19 +129,17 @@ class Evidence:
 
                 self._evidence.set(v, jp.java.lang.Double(value[1]))
 
+        return self._evidence
+
 class NetworkModel:
 
-    def __init__(self, data, network, datastore, logger):
+    def __init__(self, network, data_store, logger):
         self._jnetwork = network
         self._factory = bayesServerInference.RelevanceTreeInferenceFactory()
-
-        self._inference = self._factory.createInferenceEngine(network)
-        self._queryOptions = self._factory.createQueryOptions()
-        self._queryOutput = self._factory.createQueryOutput()
-
-        self._datastore = datastore
+        self._inference_factory = InferenceEngine(network)
+        self._data_store = data_store
         self._logger = logger
-        self._data = data
+        self._data = data_store.data
 
     def get_network(self):
         return self._jnetwork
@@ -129,11 +150,11 @@ class NetworkModel:
         :param indexes: training/ testing indexes
         :return: a a DatabaseDataReaderCommand
         """
-        dataReaderCommand = bayesServer.data.DatabaseDataReaderCommand(
-                self._datastore.get_connection(),
-                "select * from {} where ix in ({})".format(self._datastore.table, ",".join(str(i) for i in indexes)))
+        data_reader_command = bayesServer.data.DatabaseDataReaderCommand(
+                self._data_store.get_connection(),
+                "select * from {} where ix in ({})".format(self._data_store.table, ",".join(str(i) for i in indexes)))
 
-        return dataReaderCommand
+        return data_reader_command
 
     def _create_variablereferences(self, data):
         """
@@ -148,7 +169,9 @@ class NetworkModel:
 
             valueType = bayesServer.data.ColumnValueType.VALUE
 
-            if bayespy.network.is_variable_discrete(v):
+            if v.getStateValueType() != bayesServer.StateValueType.DOUBLE_INTERVAL \
+                    and bayespy.network.is_variable_discrete(v):
+
                 if not DataFrame.is_int(data[v.getName()].dtype) and not DataFrame.is_bool(data[v.getName()].dtype):
                     valueType = bayesServer.data.ColumnValueType.NAME
 
@@ -177,22 +200,25 @@ class NetworkModel:
         :param indexes: the 'training' indexes, if using KFold cross validation etc.
         :return:
         """
-        learning = bayesServerParams.ParameterLearning(self._jnetwork, bayesServerInference.RelevanceTreeInferenceFactory())
-        learningOptions = bayesServerParams.ParameterLearningOptions()
+        learning = bayesServerParams.ParameterLearning(self._jnetwork, self._inference_factory.inference_factory)
+        learning_options = bayesServerParams.ParameterLearningOptions()
         #learningOptions.setCalculateStatistics(True)
 
         if indexes is None:
             indexes = self._data.index.tolist()
 
-        dataReaderCommand = self._get_datareadercommand(indexes)
+        data_reader_command = self._get_datareadercommand(indexes)
 
-        readerOptions = bayesServer.data.ReaderOptions()
+        reader_options = bayesServer.data.ReaderOptions()
 
-        variableRefs = list(self._create_variablereferences(self._data))
+        variable_references = list(self._create_variablereferences(self._data))
 
-        evidenceReaderCommand = bayesServer.data.DefaultEvidenceReaderCommand(dataReaderCommand, jp.java.util.Arrays.asList(variableRefs), readerOptions)
+        evidence_reader_command = bayesServer.data.DefaultEvidenceReaderCommand(data_reader_command,
+                                            jp.java.util.Arrays.asList(variable_references), reader_options)
 
-        result = learning.learn(evidenceReaderCommand, learningOptions)
+        self._logger.info("Training model...")
+        result = learning.learn(evidence_reader_command, learning_options)
+        self._logger.info("Finished training model")
 
         return {'Converged': result.getConverged(), 'Loglikelihood': result.getLogLikelihood().floatValue(),
                     'IterationCount': result.getIterationCount(), 'CaseCount': result.getCaseCount(),
@@ -200,6 +226,8 @@ class NetworkModel:
                     'BIC': result.getBIC().floatValue()}
 
     def batch_query(self, queries=[]):
+
+        (inference_engine, query_options, query_output) = self._inference_factory.create(loglikelihood=True)
 
         data_reader_cmd = self._get_datareadercommand(self._data.index.tolist())
 
@@ -210,14 +238,14 @@ class NetworkModel:
 
         i = 0
         results = []
-        while reader.read(self._inference.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
+        while reader.read(inference_engine.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
             try:
-                self._queryOptions.setLogLikelihood(True)
-                self._inference.query(self._queryOptions, self._queryOutput)
+                #query_options.setLogLikelihood(True)
+                inference_engine.query(query_options, query_output)
             except BaseException as e:
                 print(e)
 
-            loglikelihood = self._queryOutput.getLogLikelihood()
+            loglikelihood = query_output.getLogLikelihood()
             caseId = reader.getReadInfo().getCaseId()
             #self._data.set_value(caseId, 'loglikelihood', loglikelihood)
 
@@ -247,7 +275,7 @@ class NetworkModel:
             #         results[v.getName()].append(states)
 
 
-            self._inference.getEvidence().clear()
+            inference_engine.getEvidence().clear()
 
         reader.close()
         data_reader.close()
