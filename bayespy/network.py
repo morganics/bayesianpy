@@ -292,7 +292,11 @@ def is_variable_continuous(v):
     return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
 
 def get_variable(network, variable_name):
-    return network.getVariables().get(variable_name)
+    variable = network.getVariables().get(variable_name)
+    if variable is None:
+        raise ValueError("Variable {} does not exist".format(variable_name))
+
+    return variable
 
 def remove_continuous_nodes(network):
     n = network.copy()

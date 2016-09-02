@@ -131,7 +131,17 @@ class AutoInsight:
         return combinations.sort_values(by=['max_difference']).reset_index()
 
     def get_exclusive_states(self, top=10):
-        return self.get_insightful_states(using='lift', top=top)
+        models = self._create_models()
+        rows = pd.DataFrame()
+        for model in models:
+            rows = rows.append(model.calculate(), ignore_index=True)
+
+        # this gets the probability given the 'non-target'.
+        rows['probability_given_other'] = rows.probability_given_target - rows.difference
+
+        # only get those with a probability given 'other' of less than 2 percent
+        return rows.groupby(by=['variable', 'state']).mean().sort_values(by=['probability_given_other', 'difference'], ascending=[True, False]).head(
+            top).reset_index()
 
     def get_insightful_states(self, using='difference', top=10):
         if using not in ['lift', 'difference']:
