@@ -71,7 +71,6 @@ class AutoInsight:
             network = self._network_template.create()
             model = bayespy.model.NetworkModel(network, self._data_store, self._logger)
             model.train()
-            model.save(r"C:\Users\imorgan.admin\PycharmProjects\bayespy\examples\titanic\{}.bayes".format(i))
             self._model_cache.append(_AutoInsight(network, self._target, self._logger))
 
         return self._model_cache
@@ -140,8 +139,8 @@ class AutoInsight:
         rows['probability_given_other'] = rows.probability_given_target - rows.difference
 
         # only get those with a probability given 'other' of less than 2 percent
-        return rows.groupby(by=['variable', 'state']).mean().sort_values(by=['probability_given_other', 'difference'], ascending=[True, False]).head(
-            top).reset_index()
+        rows = rows.groupby(by=['variable', 'state']).mean().sort_values(by=['difference'], ascending=[False])
+        return rows[rows.probability_given_other < 0.02].head(top).reset_index()
 
     def get_insightful_states(self, using='difference', top=10):
         if using not in ['lift', 'difference']:
