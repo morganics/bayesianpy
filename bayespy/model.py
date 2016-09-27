@@ -6,13 +6,16 @@ Created on Tue Apr 19 16:31:18 2016
 """
 
 from bayespy.jni import bayesServerInference
+from bayespy.jni import bayesServerAnalysis
+from bayespy.jni import bayesServerDiscovery
+
 import bayespy.network
 import pandas as pd
 from bayespy.jni import bayesServer
 from bayespy.jni import bayesServerParams
 from bayespy.jni import jp
 from bayespy.data import DataFrame
-
+import numpy as np
 from collections import defaultdict
 
 class QueryOutput:
@@ -27,7 +30,7 @@ class InferenceEngine:
     def __init__(self, network):
         self._network = network
 
-    def create(self, loglikelihood=False, conflict=False, retract=True):
+    def create(self, loglikelihood=False, conflict=False, retract=False):
         query_options = self.inference_factory.createQueryOptions()
         query_output = self.inference_factory.createQueryOutput()
         inference_engine = self.inference_factory.createInferenceEngine(self._network)
@@ -131,6 +134,113 @@ class Evidence:
 
         return self._evidence
 
+class QueryStatistics:
+
+    def __init__(self, calc_loglikelihood=True, calc_conflict=False, loglikelihood_column='loglikelihood', conflict_column='conflict'):
+        self._calc_loglikelihood = calc_loglikelihood
+        self._calc_conflict = calc_conflict
+        self._loglikelihood_column = loglikelihood_column
+        self._conflict_column = conflict_column
+
+    def setup(self, inference_engine, query_options):
+        query_options.setLogLikelihood(self._calc_loglikelihood)
+        query_options.setConflict(self._calc_conflict)
+
+    def results(self, inference_engine, query_output):
+        result = {}
+        if self._calc_loglikelihood:
+            result.update({ self._loglikelihood_column: query_output.getLogLikelihood().floatValue() })
+
+        if self._calc_conflict:
+            result.update({ self._conflict_column: query_output.getConflict().floatValue()})
+
+        return result
+
+class QueryMostLikelyState:
+
+    def __init__(self, network, target_variable_name, output_dtype="object", suffix="_maxlikelihood"):
+        self._target_variable_name = target_variable_name
+        self._distribution = None
+        self._output_dtype = output_dtype
+        self._variable = bayespy.network.get_variable(network, self._target_variable_name)
+        self._suffix = suffix
+
+    def setup(self, inference_engine, query_options):
+        distribution = None
+        if bayespy.network.is_variable_discrete(self._variable):
+            distribution = bayesServer.Table(self._variable)
+
+        if distribution is None:
+            raise ValueError("{} needs to be discrete in QueryMostLikelyState".format(self._target_variable_name))
+
+        query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+        qd = bayesServerInference.QueryDistribution(distribution)
+
+        self._distribution = distribution
+        inference_engine.getQueryDistributions().add(qd)
+
+    def results(self, inference_engine, query_output):
+        states = {}
+        for state in self._variable.getStates():
+            states.update({ state.getName() : self._distribution.get([state])})
+
+        # get the most likely state
+        max_state = max(states.keys(), key=(lambda key: states[key]))
+        max_state_name = bayespy.data.DataFrame.cast2(self._output_dtype, max_state)
+
+        return {self._target_variable_name + self._suffix: max_state_name}
+
+class QueryLogLikelihood:
+    def __init__(self, network, variable_names, column_name='_loglikelihood'):
+        self._variable_names = variable_names
+        self._distributions = []
+        for variable_name in variable_names:
+            variable = bayespy.network.get_variable(network, variable_name)
+            distribution = None
+            if bayespy.network.is_variable_continuous(variable):
+                distribution = bayesServer.CLGaussian(variable)
+            elif bayespy.network.is_variable_discrete(variable):
+                distribution = bayesServer.Table(variable)
+
+            if distribution is not None:
+                self._distributions.append(distribution)
+
+        self._column_name = column_name
+
+    def setup(self, inference_engine, query_options):
+        query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+        self._query_distributions = []
+        for _, distribution in enumerate(self._distributions):
+            qd = bayesServerInference.QueryDistribution(distribution)
+            qd.setQueryLogLikelihood(True)
+            self._query_distributions.append(qd)
+            inference_engine.getQueryDistributions().add(qd)
+
+    def results(self, inference_engine, query_output):
+        names = "_".join(self._variable_names)
+        result = {}
+        for i, qd in enumerate(self._query_distributions):
+            result.update({ self._variable_names[i] + self._column_name: qd.getLogLikelihood().floatValue()  })
+        return result
+
+class QueryMean:
+    def __init__(self, network, variable_name, retract_evidence=True, result_suffix='_mean'):
+        self._variable_name = variable_name
+        variable = bayespy.network.get_variable(network, variable_name)
+        self._table = bayesServer.Table(variable)
+        self._result_suffix = result_suffix
+        self._retract_evidence = retract_evidence
+
+    def setup(self, inference_engine, query_options):
+        if self._retract_evidence:
+            query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+
+        inference_engine.getQueryDistributions().add(self._table)
+
+    def results(self, inference_engine, query_output):
+        return {self._variable_name + self._result_suffix: self._table.getMean()}
+
+
 class NetworkModel:
 
     def __init__(self, network, data_store, logger):
@@ -143,39 +253,6 @@ class NetworkModel:
 
     def get_network(self):
         return self._jnetwork
-
-    def _get_datareadercommand(self, indexes):
-        """
-        Get the data reader
-        :param indexes: training/ testing indexes
-        :return: a a DatabaseDataReaderCommand
-        """
-        data_reader_command = bayesServer.data.DatabaseDataReaderCommand(
-                self._data_store.get_connection(),
-                "select * from {} where ix in ({})".format(self._data_store.table, ",".join(str(i) for i in indexes)))
-
-        return data_reader_command
-
-    def _create_variablereferences(self, data):
-        """
-        Match up network variables to the dataframe columns
-        :param data: dataframe
-        :return: a list of 'VariableReference' objects
-        """
-        latent_variable_name = "Cluster"
-        for v in self._jnetwork.getVariables():
-            if v.getName().startswith(latent_variable_name):
-                continue
-
-            valueType = bayesServer.data.ColumnValueType.VALUE
-
-            if v.getStateValueType() != bayesServer.StateValueType.DOUBLE_INTERVAL \
-                    and bayespy.network.is_variable_discrete(v):
-
-                if not DataFrame.is_int(data[v.getName()].dtype) and not DataFrame.is_bool(data[v.getName()].dtype):
-                    valueType = bayesServer.data.ColumnValueType.NAME
-
-            yield bayesServer.data.VariableReference(v, valueType, v.getName())
 
     def inference(self):
         return self._factory.createInferenceEngine(self._jnetwork);
@@ -193,6 +270,8 @@ class NetworkModel:
         with open(path, 'w') as fh:
             fh.write(reparsed.toprettyxml(indent="  "))
 
+    def is_trained(self):
+        return bayespy.network.is_trained(self._jnetwork)
 
     def train(self, indexes=None):
         """
@@ -207,11 +286,11 @@ class NetworkModel:
         if indexes is None:
             indexes = self._data.index.tolist()
 
-        data_reader_command = self._get_datareadercommand(indexes)
+        data_reader_command = self._data_store.create_data_reader_command()
 
         reader_options = bayesServer.data.ReaderOptions()
 
-        variable_references = list(self._create_variablereferences(self._data))
+        variable_references = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
 
         evidence_reader_command = bayesServer.data.DefaultEvidenceReaderCommand(data_reader_command,
                                             jp.java.util.Arrays.asList(variable_references), reader_options)
@@ -225,57 +304,44 @@ class NetworkModel:
                     'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
                     'BIC': result.getBIC().floatValue()}
 
-    def batch_query(self, queries=[]):
+    def batch_query(self, queries=[QueryStatistics()]):
 
-        (inference_engine, query_options, query_output) = self._inference_factory.create(loglikelihood=True)
+        (inference_engine, query_options, query_output) = self._inference_factory.create()
 
-        data_reader_cmd = self._get_datareadercommand(self._data.index.tolist())
+        data_reader_command = self._data_store.create_data_reader_command()
+        data_reader = data_reader_command.executeReader()
 
-        data_reader = data_reader_cmd.executeReader()
         reader_options = bayesServer.data.ReaderOptions("ix")
-        variable_refs = list(self._create_variablereferences(self._data))
+        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
         reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
+
+        for query in queries:
+            query.setup(inference_engine, query_options)
 
         i = 0
         results = []
         while reader.read(inference_engine.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
+            result = {}
+
             try:
-                #query_options.setLogLikelihood(True)
                 inference_engine.query(query_options, query_output)
             except BaseException as e:
-                print(e)
+                self._logger.error(e)
+                inference_engine.getEvidence().clear()
+                continue
 
-            loglikelihood = query_output.getLogLikelihood()
-            caseId = reader.getReadInfo().getCaseId()
-            #self._data.set_value(caseId, 'loglikelihood', loglikelihood)
+            for query in queries:
+                result = {**result, **query.results(inference_engine, query_output)}
 
-            results.append({ 'caseid': caseId.value, 'loglikelihood': loglikelihood.value})
+            inference_engine.getEvidence().clear()
+            result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
+
+            results.append(result)
 
             if i % 500 == 0:
                 self._logger.debug("Queried case {}".format(i))
 
             i += 1
-            # for v, target in target_nodes:
-            #     if bayespy.network.is_variable_continuous(v):
-            #         #continuous
-            #         results[v.getName()].append(target.getMean(v))
-            #     else:
-            #         # discrete
-            #         states = {}
-            #
-            #         for state in v.getStates():
-            #             states.update({ state.getName() : target.get([state])})
-            #
-            #         max_state = max(states.keys(), key=(lambda key: states[key]))
-            #         if DataFrame.is_int(self._data[v.getName()].dtype):
-            #             max_state = int(max_state)
-            #
-            #         states.update({'MaxStateLikelihood': max_state})
-            #
-            #         results[v.getName()].append(states)
-
-
-            inference_engine.getEvidence().clear()
 
         reader.close()
         data_reader.close()
@@ -344,6 +410,10 @@ class NetworkModel:
     #     reader.close()
     #     dataReader.close()
     #     return {k:pd.DataFrame(v) for k,v in results.items()}
+
+
+
+
 
 
 
