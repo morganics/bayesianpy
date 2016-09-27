@@ -45,19 +45,40 @@ class Builder:
     def get_variable(network, variable):
         return network.getVariables().get(variable)
 
+    def try_get_node(network, node_name):
+        try:
+            n = Builder.get_node(network, node_name)
+            return n
+        except:
+            return False
+
+    def get_node(network, node):
+        return network.getNodes().get(node)
+
     def create_link(network, n1, n2, t=None):
         if isinstance(n1, str):
-            n1 = Builder.get_variable(n1)
+            n1_name = n1
+            n1 = Builder.get_node(network, n1)
 
-        if isinstance(n1, str):
-            n2 = Builder.get_variable(n2)
+        if isinstance(n2, str):
+            n2_name = n2
+            n2 = Builder.get_node(network, n2)
+
+        if n1 is None:
+            raise ValueError("N1 {} was not recognised".format(n1_name))
+
+        if n2 is None:
+            raise ValueError("N2 {} was not recognised".format(n2_name))
 
         if t is not None:
             l = bayesServer.Link(n1, n2, t)
         else:
             l = bayesServer.Link(n1, n2)
 
-        network.getLinks().add(l)
+        try:
+            network.getLinks().add(l)
+        except BaseException as e:
+            raise ValueError(e.message() + ". Trying to add link from {} to {}".format(n1.getName(), n2.getName()))
 
     def _create_interval_name(interval, decimal_places):
         title = ""
@@ -85,13 +106,23 @@ class Builder:
         return n
 
     def create_continuous_variable(network, node_name):
+        n = Builder.try_get_node(network, node_name)
+        if n is not None:
+            return n
+        
         v = bayesServer.Variable(node_name, bayesServer.VariableValueType.CONTINUOUS)
         n_ = bayesServer.Node(v)
+
         network.getNodes().add(n_)
+        
         return n_
 
     def create_cluster_variable(network, num_states):
-        v = bayesServer.Variable("Cluster")
+        n = Builder.get_node(network, "Cluster")        
+        if n is not None:
+            return n
+        
+        v = bayesServer.Variable("Cluster")        
         parent = bayesServer.Node(v)
         for i in range(num_states):
             v.getStates().add(bayesServer.State("Cluster{}".format(i)))
@@ -100,6 +131,10 @@ class Builder:
         return parent
 
     def create_discrete_variable(network, data, node_name, states):
+        n = Builder.try_get_node(network, node_name)
+        if n is not None:
+            return n
+            
         v = bayesServer.Variable(node_name)
         n_ = bayesServer.Node(v)
 
@@ -107,10 +142,11 @@ class Builder:
             v.getStates().add(bayesServer.State(str(s)))
 
         if node_name in data.columns.tolist():
-            if DataFrame.is_int(data[node_name].dtype):
+
+            if DataFrame.is_int(data[node_name].dtype) or DataFrame.could_be_int(data[node_name]):
                 v.setStateValueType(bayesServer.StateValueType.INTEGER)
                 for state in v.getStates():
-                    state.setValue(jp.java.lang.Integer(state.getName()))
+                    state.setValue(jp.java.lang.Integer(int(float(state.getName()))))
 
             if DataFrame.is_bool(data[node_name].dtype):
                 v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
@@ -329,6 +365,28 @@ def get_other_states_from_variable(network, target):
 
         yield state(target.variable, st.getName())
 
+
+def create_variable_references(network, data):
+    """
+    Match up network variables to the dataframe columns
+    :param data: dataframe
+    :return: a list of 'VariableReference' objects
+    """
+    latent_variable_name = "Cluster"
+    for v in network.getVariables():
+        if v.getName().startswith(latent_variable_name):
+            continue
+
+        valueType = bayesServer.data.ColumnValueType.VALUE
+
+        if v.getStateValueType() != bayesServer.StateValueType.DOUBLE_INTERVAL \
+                and bayespy.network.is_variable_discrete(v):
+
+            if not DataFrame.is_int(data[v.getName()].dtype) and not DataFrame.is_bool(data[v.getName()].dtype):
+                valueType = bayesServer.data.ColumnValueType.NAME
+
+        yield bayesServer.data.VariableReference(v, valueType, v.getName())
+
 def save(network, path):
     from xml.dom import minidom
     nt = network.saveToString()
@@ -342,6 +400,13 @@ def is_cluster_variable(v):
         v = v.getName()
     return v == "Cluster" or v.startswith("Cluster_")
 
+def is_trained(network):
+    for n in network.getNodes():
+        if n.getDistribution() is None:
+            return False
+            
+    return True
+
 
 class DataStore:
     def __init__(self, logger, db_folder, dataframe):
@@ -353,6 +418,9 @@ class DataStore:
         self.table = "table_" + self.uuid
         self._logger = logger
         self.data = dataframe
+
+    def get_dataframe(self):
+        return self.data
 
     def get_connection(self):
         return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, self.uuid))
@@ -366,9 +434,28 @@ class DataStore:
         self.data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
         self._logger.debug("Finished writing {} rows to storage".format(len(self.data)))
 
+    def create_data_reader_command(self, indexes=[]):
+        """
+        Get the data reader
+        :param indexes: training/ testing indexes
+        :return: a a DatabaseDataReaderCommand
+        """
+
+        if len(indexes) == 0:
+            indexes = self.get_dataframe().index.tolist()
+
+        data_reader_command = bayesServer.data.DatabaseDataReaderCommand(
+            self.get_connection(),
+            "select * from {} where ix in ({})".format(self.table, ",".join(str(i) for i in indexes)))
+
+        return data_reader_command
+
     def cleanup(self):
         self._logger.debug("Cleaning up: deleting db folder")
-        shutil.rmtree(self._db_dir)
+        try:
+            shutil.rmtree(self._db_dir)
+        except:
+            self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
 
 class NetworkFactory:
     def __init__(self, data, db_folder, logger, network_file_path = None) -> object:
@@ -395,10 +482,10 @@ class NetworkFactory:
         return create_network_from_file(path)
 
     def create(self):
-        if self._network_file_path is None:
+        if self._network_file_path is None or not os.path.exists(self._network_file_path):
             return create_network()
         else:
-            self.create_from_file(self._network_file_path)
+            return self.create_from_file(self._network_file_path)
 
     def create_network(self) -> (object, NetworkBuilder):
         network = create_network()
