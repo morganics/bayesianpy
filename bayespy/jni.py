@@ -8,10 +8,10 @@ separator = ";"
 if platform.system() == "Linux":
     separator = ":"
 
-classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-7.6.jar'),
+classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-7.8.jar'),
                               os.path.join(path_to_package, 'bin/sqlite-jdbc-3.8.11.2.jar'))
 if not jp.isJVMStarted():
-    jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath))
+    jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx6g")
 
     # so it doesn't crash if called by a Python thread.
     if not jp.isThreadAttachedToJVM():
@@ -23,3 +23,4 @@ if not jp.isJVMStarted():
     bayesServerAnalysis = jp.JPackage("com.bayesserver.analysis")
     bayesServerParams = jp.JPackage("com.bayesserver.learning.parameters")
     bayesServerDiscovery = jp.JPackage("com.bayesserver.data.discovery")
+    bayesServerStructure = jp.JPackage("com.bayesserver.learning.structure")
