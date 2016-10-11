@@ -334,6 +334,13 @@ def get_variable(network, variable_name):
 
     return variable
 
+def variable_exists(network, variable_name):
+    try:
+        get_variable(network, variable_name)
+        return True
+    except ValueError:
+        return False
+
 def remove_continuous_nodes(network):
     n = network.copy()
     to_remove = []
@@ -430,9 +437,9 @@ class DataStore:
             os.makedirs(self._db_dir)
 
     def write(self):
-        self._logger.debug("Writing {} rows to storage".format(len(self.data)))
+        self._logger.info("Writing {} rows to storage".format(len(self.data)))
         self.data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
-        self._logger.debug("Finished writing {} rows to storage".format(len(self.data)))
+        self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
 
     def create_data_reader_command(self, indexes=[]):
         """
