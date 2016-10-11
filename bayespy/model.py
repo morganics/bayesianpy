@@ -156,6 +156,11 @@ class QueryStatistics:
 
         return result
 
+# seems like a better name than QueryStatistics, so just having this here.
+class QueryModelStatistics(QueryStatistics):
+    def __init__(self, calc_loglikelihood=True, calc_conflict=False, loglikelihood_column='loglikelihood', conflict_column='conflict'):
+        super().__init__(calc_loglikelihood, calc_conflict, loglikelihood_column, conflict_column)
+
 class QueryMostLikelyState:
 
     def __init__(self, network, target_variable_name, output_dtype="object", suffix="_maxlikelihood"):
@@ -194,6 +199,7 @@ class QueryLogLikelihood:
     def __init__(self, network, variable_names, column_name='_loglikelihood'):
         self._variable_names = variable_names
         self._distributions = []
+        self._query_distributions = []
         for variable_name in variable_names:
             variable = bayespy.network.get_variable(network, variable_name)
             distribution = None
@@ -209,7 +215,6 @@ class QueryLogLikelihood:
 
     def setup(self, inference_engine, query_options):
         query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
-        self._query_distributions = []
         for _, distribution in enumerate(self._distributions):
             qd = bayesServerInference.QueryDistribution(distribution)
             qd.setQueryLogLikelihood(True)
@@ -217,10 +222,9 @@ class QueryLogLikelihood:
             inference_engine.getQueryDistributions().add(qd)
 
     def results(self, inference_engine, query_output):
-        names = "_".join(self._variable_names)
         result = {}
         for i, qd in enumerate(self._query_distributions):
-            result.update({ self._variable_names[i] + self._column_name: qd.getLogLikelihood().floatValue()  })
+            result.update({self._variable_names[i] + self._column_name: qd.getLogLikelihood().floatValue()})
         return result
 
 class QueryMean:
@@ -304,7 +308,7 @@ class NetworkModel:
                     'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
                     'BIC': result.getBIC().floatValue()}
 
-    def batch_query(self, queries=[QueryStatistics()]):
+    def batch_query(self, queries=[QueryStatistics()], append_to_df = True):
 
         (inference_engine, query_options, query_output) = self._inference_factory.create()
 
@@ -339,17 +343,19 @@ class NetworkModel:
             results.append(result)
 
             if i % 500 == 0:
-                self._logger.debug("Queried case {}".format(i))
+                self._logger.info("Queried case {}".format(i))
 
             i += 1
 
         reader.close()
         data_reader.close()
 
-        df = pd.DataFrame(results)
-        all_results = self._data.join(df.set_index('caseid'))
+        df = pd.DataFrame(results).set_index('caseid')
 
-        return all_results
+        if append_to_df:
+            return self._data.join(df)
+        else:
+            return df
 
     # def predict(self, indexes, targets=[]):
     #     """
