@@ -87,6 +87,10 @@ class DataFrame:
         return str(dtype) in ['timestamp64', 'timedelta64']
 
     @staticmethod
+    def is_numeric(dtype):
+        return DataFrame.is_float(dtype) or DataFrame.is_int(dtype)
+
+    @staticmethod
     def is_float(dtype):
         return str(dtype) in {"float32", "float64"}
 
