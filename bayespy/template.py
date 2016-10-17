@@ -147,9 +147,41 @@ class AutoStructure(Template):
 
         return network
 
+class WithDiscretisedVariables(Template):
+    def __init__(self, template: Template, logger, discretised_variables=[], bins=[]):
+        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        self._template = template
+        self._discretised_variables = discretised_variables
+        self._logger = logger
+        self._bins = bins
+
+        if len(self._bins) != self._discretised_variables:
+            raise ValueError("Bins and variables count should be the same")
+
+    def create(self):
+        network = self._template.create()
+
+        for i, var in enumerate(self._discretised_variables):
+            node = builder.get_node(network, var)
+            if node is None:
+                raise ValueError("{} does not exist".format(var))
+
+            links_from = [link.getFrom() for link in node.getLinks() if link.getFrom() != node]
+            links_to = [link.getTo() for link in node.getLinks() if link.getFrom() != node]
+
+            network.getNodes().remove(node)
+
+            n = builder.create_discretised_variable(network, self._template.get_network_factory().get_data(), var,
+                                                    bin_count=self._bins[i])
+            for l in links_from:
+                builder.create_link(network, l, n)
+
+            for l in links_to:
+                builder.create_link(network, n, l)
+
 class WithEdges(Template):
 
-    def __init__(self, template, logger, connections=[], ):
+    def __init__(self, template, logger, connections=[]):
         super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._connections = connections
