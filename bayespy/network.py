@@ -41,10 +41,11 @@ class Discrete:
 
 
 class Builder:
-
+    @staticmethod
     def get_variable(network, variable):
         return network.getVariables().get(variable)
 
+    @staticmethod
     def try_get_node(network, node_name):
         try:
             n = Builder.get_node(network, node_name)
@@ -52,9 +53,11 @@ class Builder:
         except:
             return False
 
+    @staticmethod
     def get_node(network, node):
         return network.getNodes().get(node)
 
+    @staticmethod
     def create_link(network, n1, n2, t=None):
         if isinstance(n1, str):
             n1_name = n1
@@ -80,6 +83,7 @@ class Builder:
         except BaseException as e:
             raise ValueError(e.message() + ". Trying to add link from {} to {}".format(n1.getName(), n2.getName()))
 
+    @staticmethod
     def _create_interval_name(interval, decimal_places):
         title = ""
         title += "(" if interval.getMinimumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "["
@@ -87,6 +91,7 @@ class Builder:
         title += ")" if interval.getMaximumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "]"
         return title
 
+    @staticmethod
     def create_discretised_variable(network, data, node_name, bin_count=4, infinite_extremes=True, decimal_places=4):
         options = bayesServerDiscovery.DiscretizationOptions()
         options.setInfiniteExtremes(infinite_extremes)
@@ -105,6 +110,7 @@ class Builder:
         network.getNodes().add(n)
         return n
 
+    @staticmethod
     def create_continuous_variable(network, node_name):
         n = Builder.try_get_node(network, node_name)
         if n is not None:
@@ -117,6 +123,7 @@ class Builder:
         
         return n_
 
+    @staticmethod
     def create_cluster_variable(network, num_states):
         n = Builder.get_node(network, "Cluster")        
         if n is not None:
@@ -130,6 +137,7 @@ class Builder:
         network.getNodes().add(parent)
         return parent
 
+    @staticmethod
     def create_discrete_variable(network, data, node_name, states):
         n = Builder.try_get_node(network, node_name)
         if n is not None:
