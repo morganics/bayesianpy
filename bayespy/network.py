@@ -92,12 +92,17 @@ class Builder:
         return title
 
     @staticmethod
-    def create_discretised_variable(network, data, node_name, bin_count=4, infinite_extremes=True, decimal_places=4):
+    def create_discretised_variable(network, data, node_name, bin_count=4, infinite_extremes=True, decimal_places=4, mode='EqualFrequencies'):
         options = bayesServerDiscovery.DiscretizationOptions()
         options.setInfiniteExtremes(infinite_extremes)
         options.setSuggestedBinCount(bin_count)
         values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
-        ef = bayesServerDiscovery.EqualFrequencies()
+        if mode == 'EqualFrequencies':
+            ef = bayesServerDiscovery.EqualFrequencies()
+        elif mode == 'EqualIntervals':
+            ef = bayesServerDiscovery.EqualIntervals()
+        else:
+            raise ValueError("mode not recognised")
 
         intervals = ef.discretize(values, options, jp.JString(node_name))
 
