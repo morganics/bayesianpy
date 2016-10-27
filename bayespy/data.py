@@ -126,15 +126,19 @@ class DataFrame:
             if col in ignore:
                 continue
             values = df[col].dropna().unique()
+            ratio = 0
             pre_length = len(values)
-            new_values = pd.to_numeric(df[col].dropna().unique(), errors='coerce')
-            post_length = len(new_values[~np.isnan(new_values)])
-            ratio = (pre_length - post_length) / pre_length
+
+            if pre_length > 0:
+                new_values = pd.to_numeric(df[col].dropna().unique(), errors='coerce')
+                post_length = len(new_values[~np.isnan(new_values)])
+                ratio = (pre_length - post_length) / pre_length
+
             if ratio <= cutoff:
-                logger.info("Converting column {} to numeric (ratio: {})".format(col, ratio))
+                logger.debug("Converting column {} to numeric (ratio: {})".format(col, ratio))
                 df[col] = pd.to_numeric(df[col], errors='coerce')
             else:
-                logger.info("Not converting column {} (ratio: {})".format(col, ratio))
+                logger.debug("Not converting column {} (ratio: {})".format(col, ratio))
 
         return df
 
