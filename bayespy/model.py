@@ -224,25 +224,34 @@ class QueryLogLikelihood:
     def results(self, inference_engine, query_output):
         result = {}
         for i, qd in enumerate(self._query_distributions):
-            result.update({self._variable_names[i] + self._column_name: qd.getLogLikelihood().floatValue()})
+            ll = qd.getLogLikelihood()
+            if ll is not None:
+                ll = ll.floatValue()
+            result.update({self._variable_names[i] + self._column_name: ll})
         return result
 
-class QueryMean:
-    def __init__(self, network, variable_name, retract_evidence=True, result_suffix='_mean'):
+class QueryMeanVariance:
+    def __init__(self, network, variable_name, retract_evidence=True, result_mean_suffix='_mean', result_variance_suffix='_variance'):
         self._variable_name = variable_name
-        variable = bayespy.network.get_variable(network, variable_name)
-        self._table = bayesServer.Table(variable)
-        self._result_suffix = result_suffix
+        self._variable = bayespy.network.get_variable(network, variable_name)
+
+        if not bayespy.network.is_variable_continuous(self._variable):
+            raise ValueError("{} needs to be continuous.".format(self._variable_name))
+
+        self._query = bayesServer.CLGaussian(self._variable)
+        self._result_mean_suffix = result_mean_suffix
+        self._result_variance_suffix = result_variance_suffix
         self._retract_evidence = retract_evidence
 
     def setup(self, inference_engine, query_options):
         if self._retract_evidence:
             query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
 
-        inference_engine.getQueryDistributions().add(self._table)
+        inference_engine.getQueryDistributions().add(bayesServerInference.QueryDistribution(self._query))
 
     def results(self, inference_engine, query_output):
-        return {self._variable_name + self._result_suffix: self._table.getMean()}
+        return {self._variable_name + self._result_mean_suffix: self._query.getMean(self._variable),
+                self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
 
 
 class NetworkModel:
@@ -259,7 +268,7 @@ class NetworkModel:
         return self._jnetwork
 
     def inference(self):
-        return self._factory.createInferenceEngine(self._jnetwork);
+        return self._factory.createInferenceEngine(self._jnetwork)
 
     def create_query(self, inference):
         return Query(self._jnetwork, inference)
@@ -285,7 +294,6 @@ class NetworkModel:
         """
         learning = bayesServerParams.ParameterLearning(self._jnetwork, self._inference_factory.inference_factory)
         learning_options = bayesServerParams.ParameterLearningOptions()
-        #learningOptions.setCalculateStatistics(True)
 
         if indexes is None:
             indexes = self._data.index.tolist()
@@ -308,20 +316,7 @@ class NetworkModel:
                     'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
                     'BIC': result.getBIC().floatValue()}
 
-    def batch_query(self, queries=[QueryStatistics()], append_to_df = True):
-
-        (inference_engine, query_options, query_output) = self._inference_factory.create()
-
-        data_reader_command = self._data_store.create_data_reader_command()
-        data_reader = data_reader_command.executeReader()
-
-        reader_options = bayesServer.data.ReaderOptions("ix")
-        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
-        reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
-
-        for query in queries:
-            query.setup(inference_engine, query_options)
-
+    def _batch_query(self, reader, inference_engine, query_options, query_output, queries):
         i = 0
         results = []
         while reader.read(inference_engine.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
@@ -331,8 +326,8 @@ class NetworkModel:
                 inference_engine.query(query_options, query_output)
             except BaseException as e:
                 self._logger.error(e)
-                inference_engine.getEvidence().clear()
-                continue
+                #inference_engine.getEvidence().clear()
+                #continue
 
             for query in queries:
                 result = {**result, **query.results(inference_engine, query_output)}
@@ -347,8 +342,27 @@ class NetworkModel:
 
             i += 1
 
-        reader.close()
-        data_reader.close()
+        return results
+
+    def batch_query(self, queries=[QueryStatistics()], append_to_df = True):
+
+        (inference_engine, query_options, query_output) = self._inference_factory.create()
+
+        data_reader_command = self._data_store.create_data_reader_command()
+        data_reader = data_reader_command.executeReader()
+
+        reader_options = bayesServer.data.ReaderOptions("ix")
+        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
+        reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
+
+        for query in queries:
+            query.setup(inference_engine, query_options)
+
+        try:
+            results = self._batch_query(reader, inference_engine, query_options, query_output, queries)
+        finally:
+            reader.close()
+            data_reader.close()
 
         df = pd.DataFrame(results).set_index('caseid')
 
