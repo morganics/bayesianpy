@@ -6,6 +6,7 @@ from bayespy.data import DataFrame
 import shutil
 from bayespy.model import NetworkModel
 import os
+import numpy as np
 
 def create_network():
     return bayesServer.Network(str(uuid.getnode()))
@@ -92,19 +93,30 @@ class Builder:
         return title
 
     @staticmethod
-    def create_discretised_variable(network, data, node_name, bin_count=4, infinite_extremes=True, decimal_places=4, mode='EqualFrequencies'):
-        options = bayesServerDiscovery.DiscretizationOptions()
-        options.setInfiniteExtremes(infinite_extremes)
-        options.setSuggestedBinCount(bin_count)
-        values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
-        if mode == 'EqualFrequencies':
-            ef = bayesServerDiscovery.EqualFrequencies()
-        elif mode == 'EqualIntervals':
-            ef = bayesServerDiscovery.EqualIntervals()
-        else:
-            raise ValueError("mode not recognised")
+    def create_discretised_variable(network, data, node_name, bin_count=4,
+                                    infinite_extremes=True,
+                                    decimal_places=4,
+                                    mode='EqualFrequencies',
+                                    bins=[]):
+        if len(bins) == 0:
+            options = bayesServerDiscovery.DiscretizationOptions()
+            options.setInfiniteExtremes(infinite_extremes)
+            options.setSuggestedBinCount(bin_count)
+            values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
+            if mode == 'EqualFrequencies':
+                ef = bayesServerDiscovery.EqualFrequencies()
+            elif mode == 'EqualIntervals':
+                ef = bayesServerDiscovery.EqualIntervals()
+            else:
+                raise ValueError("mode not recognised")
 
-        intervals = ef.discretize(values, options, jp.JString(node_name))
+            intervals = ef.discretize(values, options, jp.JString(node_name))
+        else:
+            intervals = []
+            for bin in bins:
+                minEndPoint = bayesServer.IntervalEndPoint.CLOSED if bin[2] == "closed" else bayesServer.IntervalEndPoint.OPEN
+                maxEndPoint = bayesServer.IntervalEndPoint.CLOSED if bin[3] == "closed" else bayesServer.IntervalEndPoint.OPEN
+                intervals.append(bayesServer.Interval(jp.java.lang.Double(bin[0]), jp.java.lang.Double(bin[1]), minEndPoint, maxEndPoint))
 
         v = bayesServer.Variable(node_name, bayesServer.VariableValueType.DISCRETE)
         v.setStateValueType(bayesServer.StateValueType.DOUBLE_INTERVAL)
@@ -397,15 +409,19 @@ def create_variable_references(network, data):
         if v.getName().startswith(latent_variable_name):
             continue
 
+        name = v.getName()
+        if name.endswith("_0Node"):
+            name = name.replace("_0Node","")
+
         valueType = bayesServer.data.ColumnValueType.VALUE
 
         if v.getStateValueType() != bayesServer.StateValueType.DOUBLE_INTERVAL \
                 and bayespy.network.is_variable_discrete(v):
 
-            if not DataFrame.is_int(data[v.getName()].dtype) and not DataFrame.is_bool(data[v.getName()].dtype):
+            if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype):
                 valueType = bayesServer.data.ColumnValueType.NAME
 
-        yield bayesServer.data.VariableReference(v, valueType, v.getName())
+        yield bayesServer.data.VariableReference(v, valueType, name)
 
 def save(network, path):
     from xml.dom import minidom
