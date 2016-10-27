@@ -1,0 +1,1 @@
+CALL docker run %DOCKER_CMD_ARGS% %EXE_TYPE% --bucket lab-sbg-alerts --config config.json --test --tmpdir /Users
