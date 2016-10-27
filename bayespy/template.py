@@ -2,6 +2,7 @@ from bayespy.network import Builder as builder
 import pandas as pd
 import bayespy.network
 from bayespy.jni import *
+import numpy as np
 
 class Template:
     def __init__(self, network_factory, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
@@ -121,9 +122,11 @@ class AutoStructure(Template):
         variable_references = list(bayespy.network.create_variable_references(network, self._data_store.get_dataframe()))
         evidence_reader_command = bayesServer.data.DefaultEvidenceReaderCommand(data_reader_command, jp.java.util.Arrays.asList(variable_references), reader_options)
 
+        options = bayesServerStructure.PCStructuralLearningOptions()
+        options.setMaximumConditional(2)
         self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
         output = bayesServerStructure.PCStructuralLearning().learn(evidence_reader_command, jp.java.util.Arrays.asList(network.getNodes().toArray()),
-                                                                 bayesServerStructure.PCStructuralLearningOptions())
+                                                                 options)
 
         self._logger.info("Created {} links.".format(len(output.getLinkOutputs())))
 
@@ -137,7 +140,6 @@ class AutoStructure(Template):
 
     def create(self):
         network = self._template.create()
-        network.getLinks().clear()
 
         for link in self.learn().getLinkOutputs():
             try:
@@ -180,6 +182,25 @@ class WithDiscretisedVariables(Template):
             for l in links_to:
                 builder.create_link(network, n, l)
 
+        return network
+
+class With0Nodes(Template):
+
+    def __init__(self, template, logger):
+        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        self._template = template
+        self._logger = logger
+
+    def create(self):
+        network = self._template.create()
+        for node in network.getNodes():
+            if bayespy.network.is_variable_continuous(node.getVariables().get(0)):
+                n = builder.create_discretised_variable(
+                            network, self._template.get_network_factory().get_data(), node.getName() + "_0Node",
+                            bins=[(jp.java.lang.Double.NEGATIVE_INFINITY, 0.5, "closed", "open"),
+                                  (0.5, jp.java.lang.Double.POSITIVE_INFINITY, "closed", "closed")])
+
+                builder.create_link(network, n, node)
         return network
 
 class WithEdges(Template):
