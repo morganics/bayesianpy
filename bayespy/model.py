@@ -225,9 +225,8 @@ class QueryLogLikelihood:
         result = {}
         for i, qd in enumerate(self._query_distributions):
             ll = qd.getLogLikelihood()
-            if ll is not None:
-                ll = ll.floatValue()
-            result.update({self._variable_names[i] + self._column_name: ll})
+            value = ll.floatValue() if ll is not None else np.nan
+            result.update({self._variable_names[i] + self._column_name: value})
         return result
 
 class QueryMeanVariance:
