@@ -4,29 +4,30 @@ import bayespy.network
 from bayespy.jni import *
 import numpy as np
 
+
+
 class Template:
-    def __init__(self, network_factory, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
+    def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
         self._discrete = discrete
         self._continuous = continuous
-        self._network_factory = network_factory
 
-    def get_network_factory(self):
-        return self._network_factory
-
-    def create(self):
+    def create(self, network_factory: bayespy.network.NetworkFactory):
         pass
 
 class MixtureNaiveBayes(Template):
 
-    def __init__(self, network_factory, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, discrete_states={}):
-        super().__init__(network_factory, discrete=discrete, continuous=continuous)
+    def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, discrete_states={}, latent_variable_name='Cluster'):
+        super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._discrete_states = discrete_states
         self._logger = logger
+        self._latent_variable_name = latent_variable_name
 
-    def create(self):
-        network = self._network_factory.create()
-        cluster = builder.create_cluster_variable(network, self._latent_states)
+    def create(self, network_factory):
+        network = network_factory.create()
+        cluster = builder.try_get_node(network, "Cluster")
+        if cluster is None:
+            cluster = builder.create_cluster_variable(network, self._latent_states, variable_name=self._latent_variable_name)
 
         if not self._continuous.empty:
             for c_name in self._continuous.columns:
@@ -54,14 +55,14 @@ class MixtureNaiveBayes(Template):
         return network
 
 class NetworkWithoutEdges(Template):
-    def __init__(self, network_factory, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10,
+    def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10,
                  discrete_states={}):
-        super().__init__(network_factory, discrete=discrete, continuous=continuous)
+        super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._discrete_states = discrete_states
 
-    def create(self):
-        network = self._network_factory.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = network_factory.create()
         #builder.create_cluster_variable(network, 5)
 
         if not self._continuous.empty:
@@ -82,13 +83,13 @@ class NetworkWithoutEdges(Template):
 
 class DiscretisedMixtureNaiveBayes(Template):
 
-    def __init__(self, network_factory, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10):
-        super().__init__(network_factory, discrete=discrete, continuous=continuous)
+    def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10):
+        super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._logger = logger
 
-    def create(self):
-        network = self._network_factory.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = network_factory.create()
         cluster = builder.create_cluster_variable(network, 5)
 
         if not self._continuous.empty:
@@ -106,7 +107,7 @@ class DiscretisedMixtureNaiveBayes(Template):
 
 class AutoStructure(Template):
     def __init__(self, template, data_store, logger):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._data_store = data_store
         self._logger = logger
@@ -138,8 +139,8 @@ class AutoStructure(Template):
         return output
 
 
-    def create(self):
-        network = self._template.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = self._template.create(network_factory)
 
         for link in self.learn().getLinkOutputs():
             try:
@@ -151,7 +152,7 @@ class AutoStructure(Template):
 
 class WithDiscretisedVariables(Template):
     def __init__(self, template: Template, logger, discretised_variables=[], bins=[], mode='EqualFrequencies'):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._discretised_variables = discretised_variables
         self._logger = logger
@@ -161,9 +162,8 @@ class WithDiscretisedVariables(Template):
         if len(self._bins) != len(self._discretised_variables):
             raise ValueError("Bins and variables count should be the same")
 
-    def create(self):
-        network = self._template.create()
-
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = network_factory.create()
         for i, var in enumerate(self._discretised_variables):
             node = builder.get_node(network, var)
             if node is None:
@@ -174,7 +174,7 @@ class WithDiscretisedVariables(Template):
 
             network.getNodes().remove(node)
 
-            n = builder.create_discretised_variable(network, self._template.get_network_factory().get_data(), var,
+            n = builder.create_discretised_variable(network, network_factory.get_data(), var,
                                                     bin_count=self._bins[i], mode=self._mode)
             for l in links_from:
                 builder.create_link(network, l, n)
@@ -187,12 +187,12 @@ class WithDiscretisedVariables(Template):
 class With0Nodes(Template):
 
     def __init__(self, template, logger):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._logger = logger
 
-    def create(self):
-        network = self._template.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = self._template.create(network_factory)
         for node in network.getNodes():
             if bayespy.network.is_variable_continuous(node.getVariables().get(0)):
                 n = builder.create_discretised_variable(
@@ -203,6 +203,7 @@ class With0Nodes(Template):
                 builder.create_link(network, n, node)
         return network
 
+
 class WithEdges(Template):
 
     def __init__(self, template, logger, connections=[]):
@@ -211,9 +212,8 @@ class WithEdges(Template):
         self._connections = connections
         self._logger = logger
 
-    def create(self):
-
-        network = self._template.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = self._template.create(network_factory)
         for connection_route in self._connections:
             for i in range(0, len(connection_route)-1):
                 try:
@@ -227,12 +227,12 @@ class WithEdges(Template):
 class WithFullyConnectedNodes(Template):
 
     def __init__(self, template, fully_connected_nodes=[]):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._fully_connected_nodes = fully_connected_nodes
 
-    def create(self):
-        network = self._template.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = self._template.create(network_factory)
         for node in self._fully_connected_nodes:
             for child in network.getNodes():
                 if bayespy.network.is_cluster_variable(child):
@@ -251,12 +251,12 @@ class WithFullyConnectedNodes(Template):
 class WithMultivariateNodes(Template):
 
     def __init__(self, template, connections=[]):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._connections = connections
 
-    def create(self):
-        network = self._template.create()
+    def create(self, network_factory: bayespy.network.NetworkFactory):
+        network = self._template.create(network_factory)
         for connection_route in self._connections:
             for i in range(0, len(connection_route)):
                 builder.create_link(network, connection_route[i], connection_route[i+1])
