@@ -196,37 +196,33 @@ class QueryMostLikelyState:
         return {self._target_variable_name + self._suffix: max_state_name}
 
 class QueryLogLikelihood:
-    def __init__(self, network, variable_names, column_name='_loglikelihood'):
-        self._variable_names = variable_names
-        self._distributions = []
-        self._query_distributions = []
-        for variable_name in variable_names:
-            variable = bayespy.network.get_variable(network, variable_name)
-            distribution = None
-            if bayespy.network.is_variable_continuous(variable):
-                distribution = bayesServer.CLGaussian(variable)
-            elif bayespy.network.is_variable_discrete(variable):
-                distribution = bayesServer.Table(variable)
+    def __init__(self, network, variable_names, column_name: str='_loglikelihood'):
+        if isinstance(variable_names, str):
+            variable_names = [variable_names]
 
-            if distribution is not None:
-                self._distributions.append(distribution)
+        self._variable_names = variable_names
+        self._distribution = None
+        self._query_distribution = None
+        variables = [bayespy.network.get_variable(network, n) for n in variable_names]
+        if len(variables) == 1:
+            self._distribution = bayesServer.CLGaussian(variables[0])
+        else:
+            self._distribution = bayesServer.CLGaussian(variables)
 
         self._column_name = column_name
 
     def setup(self, inference_engine, query_options):
         query_options.setQueryEvidenceMode(bayesServerInference.QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
-        for _, distribution in enumerate(self._distributions):
-            qd = bayesServerInference.QueryDistribution(distribution)
-            qd.setQueryLogLikelihood(True)
-            self._query_distributions.append(qd)
-            inference_engine.getQueryDistributions().add(qd)
+        qd = bayesServerInference.QueryDistribution(self._distribution)
+        qd.setQueryLogLikelihood(True)
+        self._query_distribution = qd
+        inference_engine.getQueryDistributions().add(qd)
 
     def results(self, inference_engine, query_output):
         result = {}
-        for i, qd in enumerate(self._query_distributions):
-            ll = qd.getLogLikelihood()
-            value = ll.floatValue() if ll is not None else np.nan
-            result.update({self._variable_names[i] + self._column_name: value})
+        ll = self._query_distribution.getLogLikelihood()
+        value = ll.floatValue() if ll is not None else np.nan
+        result.update({":".join(self._variable_names) + self._column_name: value})
         return result
 
 class QueryMeanVariance:
@@ -285,17 +281,12 @@ class NetworkModel:
     def is_trained(self):
         return bayespy.network.is_trained(self._jnetwork)
 
-    def train(self, indexes=None):
+    def train(self):
         """
         Train a model on data provided in the constructor
-        :param indexes: the 'training' indexes, if using KFold cross validation etc.
-        :return:
         """
         learning = bayesServerParams.ParameterLearning(self._jnetwork, self._inference_factory.inference_factory)
         learning_options = bayesServerParams.ParameterLearningOptions()
-
-        if indexes is None:
-            indexes = self._data.index.tolist()
 
         data_reader_command = self._data_store.create_data_reader_command()
 
@@ -343,7 +334,10 @@ class NetworkModel:
 
         return results
 
-    def batch_query(self, queries=[QueryStatistics()], append_to_df = True):
+    def batch_query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
+
+        if not hasattr(queries, "__getitem__"):
+            queries = [queries]
 
         (inference_engine, query_options, query_output) = self._inference_factory.create()
 
@@ -351,7 +345,7 @@ class NetworkModel:
         data_reader = data_reader_command.executeReader()
 
         reader_options = bayesServer.data.ReaderOptions("ix")
-        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
+        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data, variable_references=variable_references))
         reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
 
         for query in queries:
