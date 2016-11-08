@@ -141,12 +141,8 @@ class Builder:
         return n_
 
     @staticmethod
-    def create_cluster_variable(network, num_states):
-        n = Builder.get_node(network, "Cluster")        
-        if n is not None:
-            return n
-        
-        v = bayesServer.Variable("Cluster")        
+    def create_cluster_variable(network, num_states, variable_name='Cluster'):
+        v = bayesServer.Variable(variable_name)
         parent = bayesServer.Node(v)
         for i in range(num_states):
             v.getStates().add(bayesServer.State("Cluster{}".format(i)))
@@ -379,6 +375,9 @@ def remove_continuous_nodes(network):
 
     return n
 
+def remove_node(network, node):
+    network.getNodes().remove(node)
+
 def get_number_of_states(network, variable):
     v = network.getVariables().get(variable)
     return len(v.getStates())
@@ -398,20 +397,30 @@ def get_other_states_from_variable(network, target):
         yield state(target.variable, st.getName())
 
 
-def create_variable_references(network, data):
+def create_variable_references(network, data, variable_references=[]):
     """
     Match up network variables to the dataframe columns
     :param data: dataframe
     :return: a list of 'VariableReference' objects
     """
+
+    variables = []
+
+    if len(variable_references) == 0:
+        variables = network.getVariables()
+    else:
+        for v in variable_references:
+            variables.append(bayespy.network.get_variable(network, v))
+
     latent_variable_name = "Cluster"
-    for v in network.getVariables():
+    for v in variables:
         if v.getName().startswith(latent_variable_name):
             continue
 
+        if v.getName() not in data.columns:
+            continue
+
         name = v.getName()
-        if name.endswith("_0Node"):
-            name = name.replace("_0Node","")
 
         valueType = bayesServer.data.ColumnValueType.VALUE
 
@@ -494,11 +503,12 @@ class DataStore:
             self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
 
 class NetworkFactory:
-    def __init__(self, data, db_folder, logger, network_file_path = None) -> object:
+    def __init__(self, data, db_folder, logger, network_file_path = None, network = None) -> object:
         self._logger = logger
         self._data = data
         self._network_file_path = network_file_path
         self._db_folder = db_folder
+        self._network = network
 
     def reset_dataframe(self, df):
         self._data = df
@@ -518,23 +528,12 @@ class NetworkFactory:
         return create_network_from_file(path)
 
     def create(self):
-        if self._network_file_path is None or not os.path.exists(self._network_file_path):
+        if self._network is not None:
+            return self._network
+        elif self._network_file_path is None or not os.path.exists(self._network_file_path):
             return create_network()
         else:
             return self.create_from_file(self._network_file_path)
-
-    def create_network(self) -> (object, NetworkBuilder):
-        network = create_network()
-        nb = NetworkBuilder(network)
-        return (network, nb)
-
-    def create_network_builder(self, network):
-        return NetworkBuilder(network)
-
-    def create_trained_model(self, network, train_indexes):
-        pl = NetworkModel(self._data, network, self._datastore, self._logger)
-        pl.train(train_indexes)
-        return pl
 
     def cleanup(self):
         self._datastore.cleanup()
