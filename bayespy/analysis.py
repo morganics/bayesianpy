@@ -51,7 +51,7 @@ class LogLikelihoodAnalysis:
         self._logger = logger
         pass
 
-    def analyse(self, df: pd.DataFrame, tpl_factories: Iterable[TemplateFactory], k=3):
+    def analyse(self, df: pd.DataFrame, tpl_factories: Iterable[TemplateFactory], k=3, names: Iterable[str] = None):
         kf = KFold(df.shape[0], n_folds=k, shuffle=self._shuffle)
         db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
 
@@ -59,26 +59,24 @@ class LogLikelihoodAnalysis:
         for k, (train_indexes, test_indexes) in enumerate(kf):
             x_train, x_test = df.iloc[train_indexes], df.iloc[test_indexes]
 
-            for i, factory in enumerate(tpl_factories):
+            with bayespy.network.NetworkFactory(x_train, db_folder, self._logger) as train_nf:
+                with bayespy.network.NetworkFactory(x_test, db_folder, self._logger) as test_nf:
+                    for i, factory in enumerate(tpl_factories):
 
-                tpl = factory.build(df)
+                        tpl = factory.build(df)
 
-                with bayespy.network.NetworkFactory(x_train, db_folder, self._logger) as nf:
-                    model = bayespy.model.NetworkModel(tpl.create(nf), nf.get_datastore(), self._logger)
-                    model.train()
+                        name = type(tpl).__name__ if names is None else type(tpl).__name__ + names[i]
 
-                    network = model.get_network()
+                        model = bayespy.model.NetworkModel(tpl.create(train_nf), train_nf.get_datastore(), self._logger)
+                        model.train()
 
-                with bayespy.network.NetworkFactory(x_test, db_folder, self._logger) as nf:
-                    model = bayespy.model.NetworkModel(network, nf.get_datastore(), self._logger)
+                        network = model.get_network()
+                        model = bayespy.model.NetworkModel(network, test_nf.get_datastore(), self._logger)
+                        results = model.batch_query(bayespy.model.QueryStatistics(), append_to_df=False)
+                        ll[name].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
 
-                    results = model.batch_query(bayespy.model.QueryStatistics(), append_to_df=False)
+        return pd.DataFrame(ll)
 
-                    # not ideal to remove inf, but don't want to set it to a regular number to avoid
-                    # overly biasing the mean
-                    ll[i].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
-
-        return [np.mean(v) for k,v in ll.items()]
 
 class RegressionAnalysis:
 
