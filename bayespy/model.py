@@ -14,9 +14,8 @@ import pandas as pd
 from bayespy.jni import bayesServer
 from bayespy.jni import bayesServerParams
 from bayespy.jni import jp
-from bayespy.data import DataFrame
 import numpy as np
-from collections import defaultdict
+import logging
 
 class QueryOutput:
     def __init__(self, continuous, discrete):
@@ -248,6 +247,78 @@ class QueryMeanVariance:
         return {self._variable_name + self._result_mean_suffix: self._query.getMean(self._variable),
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
 
+class BatchQuery:
+
+    def __init__(self, network, datastore, logger: logging.Logger):
+        self._inference_factory = InferenceEngine(network)
+        self._logger = logger
+        self._datastore = datastore
+        self._network = network
+
+    def _batch_query(self, reader, inference_engine, query_options, query_output, queries):
+        i = 0
+        results = []
+        while reader.read(inference_engine.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
+            result = {}
+
+            try:
+                inference_engine.query(query_options, query_output)
+            except BaseException as e:
+                self._logger.error(e)
+                # inference_engine.getEvidence().clear()
+                # continue
+
+            for query in queries:
+                result = {**result, **query.results(inference_engine, query_output)}
+
+            inference_engine.getEvidence().clear()
+            result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
+
+            results.append(result)
+
+            if i % 500 == 0:
+                self._logger.info("Queried case {}".format(i))
+
+            i += 1
+
+        return results
+
+    def query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
+
+        if not hasattr(queries, "__getitem__"):
+            queries = [queries]
+
+        (inference_engine, query_options, query_output) = self._inference_factory.create()
+
+        data_reader_command = self._datastore.create_data_reader_command()
+        data_reader = data_reader_command.executeReader()
+
+        reader_options = bayesServer.data.ReaderOptions("ix")
+        variable_refs = list(bayespy.network.create_variable_references(self._network, self._datastore.data,
+                                                                        variable_references=variable_references))
+        reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
+                                                        reader_options)
+
+        for query in queries:
+            query.setup(inference_engine, query_options)
+
+        try:
+            results = self._batch_query(reader, inference_engine, query_options, query_output, queries)
+        finally:
+            reader.close()
+            data_reader.close()
+
+        df = pd.DataFrame(results).set_index('caseid')
+
+        if append_to_df:
+            return self._datastore.data.join(df)
+        else:
+            return df
+
+
+
+
+
 
 class NetworkModel:
 
@@ -306,63 +377,11 @@ class NetworkModel:
                     'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
                     'BIC': result.getBIC().floatValue()}
 
-    def _batch_query(self, reader, inference_engine, query_options, query_output, queries):
-        i = 0
-        results = []
-        while reader.read(inference_engine.getEvidence(), bayesServer.data.DefaultReadOptions(True)):
-            result = {}
-
-            try:
-                inference_engine.query(query_options, query_output)
-            except BaseException as e:
-                self._logger.error(e)
-                #inference_engine.getEvidence().clear()
-                #continue
-
-            for query in queries:
-                result = {**result, **query.results(inference_engine, query_output)}
-
-            inference_engine.getEvidence().clear()
-            result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
-
-            results.append(result)
-
-            if i % 500 == 0:
-                self._logger.info("Queried case {}".format(i))
-
-            i += 1
-
-        return results
 
     def batch_query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
+        bq = BatchQuery(self._jnetwork, self._data_store, self._logger)
+        return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references)
 
-        if not hasattr(queries, "__getitem__"):
-            queries = [queries]
-
-        (inference_engine, query_options, query_output) = self._inference_factory.create()
-
-        data_reader_command = self._data_store.create_data_reader_command()
-        data_reader = data_reader_command.executeReader()
-
-        reader_options = bayesServer.data.ReaderOptions("ix")
-        variable_refs = list(bayespy.network.create_variable_references(self._jnetwork, self._data, variable_references=variable_references))
-        reader = bayesServer.data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs), reader_options)
-
-        for query in queries:
-            query.setup(inference_engine, query_options)
-
-        try:
-            results = self._batch_query(reader, inference_engine, query_options, query_output, queries)
-        finally:
-            reader.close()
-            data_reader.close()
-
-        df = pd.DataFrame(results).set_index('caseid')
-
-        if append_to_df:
-            return self._data.join(df)
-        else:
-            return df
 
     # def predict(self, indexes, targets=[]):
     #     """
