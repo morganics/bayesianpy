@@ -9,12 +9,16 @@ import os
 import numpy as np
 
 def create_network():
-    return bayesServer.Network(str(uuid.getnode()))
-
+    return bayesServer().Network(str(uuid.getnode()))
 
 def create_network_from_file(path):
     network = create_network()
     network.load(path)
+    return network
+
+def create_network_from_string(path):
+    network = create_network()
+    network.loadFromString(path)
     return network
 
 
@@ -75,9 +79,9 @@ class Builder:
             raise ValueError("N2 {} was not recognised".format(n2_name))
 
         if t is not None:
-            l = bayesServer.Link(n1, n2, t)
+            l = bayesServer().Link(n1, n2, t)
         else:
-            l = bayesServer.Link(n1, n2)
+            l = bayesServer().Link(n1, n2)
 
         try:
             network.getLinks().add(l)
@@ -87,9 +91,9 @@ class Builder:
     @staticmethod
     def _create_interval_name(interval, decimal_places):
         title = ""
-        title += "(" if interval.getMinimumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "["
+        title += "(" if interval.getMinimumEndPoint() == bayesServer().IntervalEndPoint.OPEN else "["
         title += "{0:.{digits}f},{1:.{digits}f}".format(interval.getMinimum().floatValue(), interval.getMaximum().floatValue(), digits=decimal_places)
-        title += ")" if interval.getMaximumEndPoint() == bayesServer.IntervalEndPoint.OPEN else "]"
+        title += ")" if interval.getMaximumEndPoint() == bayesServer().IntervalEndPoint.OPEN else "]"
         return title
 
     @staticmethod
@@ -99,14 +103,14 @@ class Builder:
                                     mode='EqualFrequencies',
                                     bins=[]):
         if len(bins) == 0:
-            options = bayesServerDiscovery.DiscretizationOptions()
+            options = bayesServerDiscovery().DiscretizationOptions()
             options.setInfiniteExtremes(infinite_extremes)
             options.setSuggestedBinCount(bin_count)
             values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
             if mode == 'EqualFrequencies':
-                ef = bayesServerDiscovery.EqualFrequencies()
+                ef = bayesServerDiscovery().EqualFrequencies()
             elif mode == 'EqualIntervals':
-                ef = bayesServerDiscovery.EqualIntervals()
+                ef = bayesServerDiscovery().EqualIntervals()
             else:
                 raise ValueError("mode not recognised")
 
@@ -114,15 +118,15 @@ class Builder:
         else:
             intervals = []
             for bin in bins:
-                minEndPoint = bayesServer.IntervalEndPoint.CLOSED if bin[2] == "closed" else bayesServer.IntervalEndPoint.OPEN
-                maxEndPoint = bayesServer.IntervalEndPoint.CLOSED if bin[3] == "closed" else bayesServer.IntervalEndPoint.OPEN
-                intervals.append(bayesServer.Interval(jp.java.lang.Double(bin[0]), jp.java.lang.Double(bin[1]), minEndPoint, maxEndPoint))
+                minEndPoint = bayesServer().IntervalEndPoint.CLOSED if bin[2] == "closed" else bayesServer().IntervalEndPoint.OPEN
+                maxEndPoint = bayesServer().IntervalEndPoint.CLOSED if bin[3] == "closed" else bayesServer().IntervalEndPoint.OPEN
+                intervals.append(bayesServer().Interval(jp.java.lang.Double(bin[0]), jp.java.lang.Double(bin[1]), minEndPoint, maxEndPoint))
 
-        v = bayesServer.Variable(node_name, bayesServer.VariableValueType.DISCRETE)
-        v.setStateValueType(bayesServer.StateValueType.DOUBLE_INTERVAL)
-        n = bayesServer.Node(v)
+        v = bayesServer().Variable(node_name, bayesServer().VariableValueType.DISCRETE)
+        v.setStateValueType(bayesServer().StateValueType.DOUBLE_INTERVAL)
+        n = bayesServer().Node(v)
         for interval in intervals:
-            v.getStates().add(bayesServer.State("{}".format(Builder._create_interval_name(interval, decimal_places)), interval))
+            v.getStates().add(bayesServer().State("{}".format(Builder._create_interval_name(interval, decimal_places)), interval))
 
         network.getNodes().add(n)
         return n
@@ -133,8 +137,8 @@ class Builder:
         if n is not None:
             return n
         
-        v = bayesServer.Variable(node_name, bayesServer.VariableValueType.CONTINUOUS)
-        n_ = bayesServer.Node(v)
+        v = bayesServer().Variable(node_name, bayesServer().VariableValueType.CONTINUOUS)
+        n_ = bayesServer().Node(v)
 
         network.getNodes().add(n_)
         
@@ -142,10 +146,10 @@ class Builder:
 
     @staticmethod
     def create_cluster_variable(network, num_states, variable_name='Cluster'):
-        v = bayesServer.Variable(variable_name)
-        parent = bayesServer.Node(v)
+        v = bayesServer().Variable(variable_name)
+        parent = bayesServer().Node(v)
         for i in range(num_states):
-            v.getStates().add(bayesServer.State("Cluster{}".format(i)))
+            v.getStates().add(bayesServer().State("Cluster{}".format(i)))
 
         network.getNodes().add(parent)
         return parent
@@ -156,21 +160,21 @@ class Builder:
         if n is not None:
             return n
             
-        v = bayesServer.Variable(node_name)
-        n_ = bayesServer.Node(v)
+        v = bayesServer().Variable(node_name)
+        n_ = bayesServer().Node(v)
 
         for s in states:
-            v.getStates().add(bayesServer.State(str(s)))
+            v.getStates().add(bayesServer().State(str(s)))
 
         if node_name in data.columns.tolist():
 
             if DataFrame.is_int(data[node_name].dtype) or DataFrame.could_be_int(data[node_name]):
-                v.setStateValueType(bayesServer.StateValueType.INTEGER)
+                v.setStateValueType(bayesServer().StateValueType.INTEGER)
                 for state in v.getStates():
                     state.setValue(jp.java.lang.Integer(int(float(state.getName()))))
 
             if DataFrame.is_bool(data[node_name].dtype):
-                v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
+                v.setStateValueType(bayesServer().StateValueType.BOOLEAN)
                 for state in v.getStates():
                     state.setValue(state.getName() == 'True')
 
@@ -219,20 +223,20 @@ class NetworkBuilder:
             n2 = self._get_variable(n2)
 
         if t is not None:
-            l = bayesServer.Link(n1, n2, t)
+            l = bayesServer().Link(n1, n2, t)
         else:
-            l = bayesServer.Link(n1, n2)
+            l = bayesServer().Link(n1, n2)
 
         self._jnetwork.getLinks().add(l)
 
     def _create_multivariate_discrete_node(self, variables, node_name, is_temporal=False):
         vlist = []
         for v in variables:
-            vlist.append(bayesServer.Variable(v, bayesServer.VariableValueType.DISCRETE))
+            vlist.append(bayesServer().Variable(v, bayesServer().VariableValueType.DISCRETE))
 
-        n_ = bayesServer.Node(node_name, vlist)
+        n_ = bayesServer().Node(node_name, vlist)
         if is_temporal:
-            n_.setTemporalType(bayesServer.TemporalType.TEMPORAL)
+            n_.setTemporalType(bayesServer().TemporalType.TEMPORAL)
 
         self._jnetwork.getNodes().add(n_)
 
@@ -241,38 +245,38 @@ class NetworkBuilder:
     def _create_multivariate_continuous_node(self, variables, node_name, is_temporal=False):
         vlist = []
         for v in variables:
-            vlist.append(bayesServer.Variable(v, bayesServer.VariableValueType.CONTINUOUS))
+            vlist.append(bayesServer().Variable(v, bayesServer().VariableValueType.CONTINUOUS))
 
-        n_ = bayesServer.Node(node_name, vlist)
+        n_ = bayesServer().Node(node_name, vlist)
         if is_temporal:
-            n_.setTemporalType(bayesServer.TemporalType.TEMPORAL)
+            n_.setTemporalType(bayesServer().TemporalType.TEMPORAL)
 
         self._jnetwork.getNodes().add(n_)
 
         return n_
 
     def _create_continuous_variable(self, node_name):
-        v = bayesServer.Variable(node_name, bayesServer.VariableValueType.CONTINUOUS)
-        n_ = bayesServer.Node(v)
+        v = bayesServer().Variable(node_name, bayesServer().VariableValueType.CONTINUOUS)
+        n_ = bayesServer().Node(v)
         self._jnetwork.getNodes().add(n_)
 
         return n_
 
     def _create_discrete_variable(self, data, node_name, states):
-        v = bayesServer.Variable(node_name)
-        n_ = bayesServer.Node(v)
+        v = bayesServer().Variable(node_name)
+        n_ = bayesServer().Node(v)
 
         for s in states:
-            v.getStates().add(bayesServer.State(str(s)))
+            v.getStates().add(bayesServer().State(str(s)))
 
         if node_name in data.columns.tolist():
             if DataFrame.is_int(data[node_name].dtype):
-                v.setStateValueType(bayesServer.StateValueType.INTEGER)
+                v.setStateValueType(bayesServer().StateValueType.INTEGER)
                 for state in v.getStates():
                     state.setValue(jp.java.lang.Integer(state.getName()))
 
             if DataFrame.is_bool(data[node_name].dtype):
-                v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
+                v.setStateValueType(bayesServer().StateValueType.BOOLEAN)
                 for state in v.getStates():
                     state.setValue(state.getName() == 'True')
 
@@ -285,10 +289,10 @@ class NetworkBuilder:
 
     def _create_parent(self, latent_states=None, parent_node=None):
         if latent_states is not None:
-            v = bayesServer.Variable("Cluster")
-            parent = bayesServer.Node(v)
+            v = bayesServer().Variable("Cluster")
+            parent = bayesServer().Node(v)
             for i in range(latent_states):
-                v.getStates().add(bayesServer.State("Cluster{}".format(i)))
+                v.getStates().add(bayesServer().State("Cluster{}".format(i)))
 
             self._jnetwork.getNodes().add(parent)
         else:
@@ -299,16 +303,16 @@ class NetworkBuilder:
     def _add_nodes(self, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
         if not discrete.empty:
             for n in discrete.columns:
-                v = bayesServer.Variable(n)
-                n_ = bayesServer.Node(v)
+                v = bayesServer().Variable(n)
+                n_ = bayesServer().Node(v)
                 if DataFrame.is_int(discrete[n].dtype):
-                    v.setStateValueType(bayesServer.StateValueType.INTEGER)
+                    v.setStateValueType(bayesServer().StateValueType.INTEGER)
 
                 if DataFrame.is_bool(discrete[n].dtype):
-                    v.setStateValueType(bayesServer.StateValueType.BOOLEAN)
+                    v.setStateValueType(bayesServer().StateValueType.BOOLEAN)
 
                 for s in discrete[n].unique():
-                    state = bayesServer.State(str(s))
+                    state = bayesServer().State(str(s))
                     if DataFrame.is_int(discrete[n].dtype):
                         state.setValue(jp.java.lang.Integer(state.getName()))
                     if DataFrame.is_bool(discrete[n].dtype):
@@ -320,8 +324,8 @@ class NetworkBuilder:
 
         if not continuous.empty:
             for n in continuous.columns:
-                v = bayesServer.Variable(n, bayesServer.VariableValueType.CONTINUOUS)
-                n_ = bayesServer.Node(v)
+                v = bayesServer().Variable(n, bayesServer().VariableValueType.CONTINUOUS)
+                n_ = bayesServer().Node(v)
                 self._jnetwork.getNodes().add(n_)
 
     def remove_continuous_nodes(self):
@@ -339,14 +343,14 @@ class NetworkBuilder:
             if node == parent:
                 continue
 
-            l = bayesServer.Link(parent, node)
+            l = bayesServer().Link(parent, node)
             self._jnetwork.getLinks().add(l)
 
 def is_variable_discrete(v):
-    return v.getValueType() == bayesServer.VariableValueType.DISCRETE
+    return v.getValueType() == bayesServer().VariableValueType.DISCRETE
 
 def is_variable_continuous(v):
-    return v.getValueType() == bayesServer.VariableValueType.CONTINUOUS
+    return v.getValueType() == bayesServer().VariableValueType.CONTINUOUS
 
 def get_variable(network, variable_name):
     variable = network.getVariables().get(variable_name)
@@ -396,7 +400,6 @@ def get_other_states_from_variable(network, target):
 
         yield state(target.variable, st.getName())
 
-
 def create_variable_references(network, data, variable_references=[]):
     """
     Match up network variables to the dataframe columns
@@ -422,15 +425,15 @@ def create_variable_references(network, data, variable_references=[]):
 
         name = v.getName()
 
-        valueType = bayesServer.data.ColumnValueType.VALUE
+        valueType = bayesServer().data.ColumnValueType.VALUE
 
-        if v.getStateValueType() != bayesServer.StateValueType.DOUBLE_INTERVAL \
+        if v.getStateValueType() != bayesServer().StateValueType.DOUBLE_INTERVAL \
                 and bayespy.network.is_variable_discrete(v):
 
             if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype):
-                valueType = bayesServer.data.ColumnValueType.NAME
+                valueType = bayesServer().data.ColumnValueType.NAME
 
-        yield bayesServer.data.VariableReference(v, valueType, name)
+        yield bayesServer().data.VariableReference(v, valueType, name)
 
 def save(network, path):
     from xml.dom import minidom
@@ -476,7 +479,7 @@ class DataStore:
 
     def write(self):
         self._logger.info("Writing {} rows to storage".format(len(self.data)))
-        self.data.to_sql("table_" + self.uuid, self._engine, if_exists='replace', index_label='ix', index=True)
+        self.data.to_sql(self.table, self._engine, if_exists='replace', index_label='ix', index=True)
         self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
 
     def create_data_reader_command(self, indexes=[]):
@@ -489,7 +492,7 @@ class DataStore:
         if len(indexes) == 0:
             indexes = self.get_dataframe().index.tolist()
 
-        data_reader_command = bayesServer.data.DatabaseDataReaderCommand(
+        data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
             self.get_connection(),
             "select * from {} where ix in ({})".format(self.table, ",".join(str(i) for i in indexes)))
 
