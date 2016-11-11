@@ -23,17 +23,17 @@ class _AutoInsight:
         variables = jp.java.util.Arrays.asList(
             [v for v in self._network.getVariables() if v.getName() != self._target.variable])
 
-        ai = bayespy.jni.bayesServerAnalysis.AutoInsight
+        ai = bayespy.jni.bayesServerAnalysis().AutoInsight
 
         if len(evidence) > 0:
             e = bayespy.model.Evidence(self._network, self._inf_engine)
             evidence_obj = e.apply(evidence)
             auto_insight_output = ai.calculate(self._target_state, variables,
-                                           bayespy.model.InferenceEngine.inference_factory,
+                                           bayespy.model.InferenceEngine.get_inference_factory(),
                                            evidence_obj)
         else:
             auto_insight_output = ai.calculate(self._target_state, variables,
-                                               bayespy.model.InferenceEngine.inference_factory)
+                                               bayespy.model.InferenceEngine.get_inference_factory())
 
         results = []
         for variable in auto_insight_output.getVariableOutputs():
