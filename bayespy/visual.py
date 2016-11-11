@@ -53,7 +53,7 @@ class NetworkLayout:
                 x = 0.0
             if y < 0:
                 y = 0.0
-            node.setBounds(bayesServer.Bounds(x, y, width, height))
+            node.setBounds(bayesServer().Bounds(x, y, width, height))
 
 class VisualiseNetworkQuery:
 

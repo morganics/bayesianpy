@@ -116,17 +116,17 @@ class AutoStructure(Template):
 
         data_reader_command = self._data_store.create_data_reader_command()
 
-        reader_options = bayesServer.data.ReaderOptions()
+        reader_options = bayesServer().data.ReaderOptions()
         network = self._template.create()
         network.getLinks().clear()
 
         variable_references = list(bayespy.network.create_variable_references(network, self._data_store.get_dataframe()))
-        evidence_reader_command = bayesServer.data.DefaultEvidenceReaderCommand(data_reader_command, jp.java.util.Arrays.asList(variable_references), reader_options)
+        evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command, jp.java.util.Arrays.asList(variable_references), reader_options)
 
-        options = bayesServerStructure.PCStructuralLearningOptions()
+        options = bayesServerStructure().PCStructuralLearningOptions()
         options.setMaximumConditional(2)
         self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
-        output = bayesServerStructure.PCStructuralLearning().learn(evidence_reader_command, jp.java.util.Arrays.asList(network.getNodes().toArray()),
+        output = bayesServerStructure().PCStructuralLearning().learn(evidence_reader_command, jp.java.util.Arrays.asList(network.getNodes().toArray()),
                                                                  options)
 
         self._logger.info("Created {} links.".format(len(output.getLinkOutputs())))
@@ -207,7 +207,7 @@ class With0Nodes(Template):
 class WithEdges(Template):
 
     def __init__(self, template, logger, connections=[]):
-        super().__init__(template.get_network_factory(), discrete=template._discrete, continuous=template._continuous)
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._connections = connections
         self._logger = logger
