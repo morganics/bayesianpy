@@ -191,19 +191,17 @@ class Filter:
         return Filter.remove_discrete_variables_with_too_many_states(Filter.remove_variable_variables(Filter.remove_static_variables(df)))
 
 def create_histogram(series):
-    hdo = bayesServerAnalysis.HistogramDensityOptions()
+    hdo = bayesServerAnalysis().HistogramDensityOptions()
     values = []
     for value in series.iteritems():
-        v = bayesServerDiscovery.WeightedValue()
+        v = bayesServerDiscovery().WeightedValue()
         if np.isnan(value[1]) or np.isinf(value[1]):
             continue
         v.setValue(jp.java.lang.Double(value[1]))
         v.setWeight(1.0)
         values.append(v)
 
-    return bayesServerAnalysis.HistogramDensity.learn(jp.java.util.Arrays.asList(values), hdo)
-
-import pandas as pd
+    return bayesServerAnalysis().HistogramDensity.learn(jp.java.util.Arrays.asList(values), hdo)
 
 def as_probability(series, output_column='cdf'):
     hist = create_histogram(series)
