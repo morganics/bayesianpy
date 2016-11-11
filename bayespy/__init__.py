@@ -9,4 +9,4 @@ from bayespy.jni import bayesServer as _bs
 from bayespy import utils
 
 def license(key):
-    l = _bs.License.validate(key)
+    l = _bs().License.validate(key)
