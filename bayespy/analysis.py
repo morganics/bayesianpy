@@ -94,7 +94,7 @@ class RegressionAnalysis:
             x_train, x_test = df.ix[train_indexes], df.ix[test_indexes]
 
             with bayespy.network.NetworkFactory(x_train, db_folder, self._logger) as nf:
-                model = bayespy.model.NetworkModel(template.create(), nf.get_datastore(), self._logger)
+                model = bayespy.model.NetworkModel(template.create(nf), nf.get_datastore(), self._logger)
                 model.train()
 
                 network = model.get_network()
