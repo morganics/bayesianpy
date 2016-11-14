@@ -324,8 +324,24 @@ class BatchQuery:
         # serialise the network as a string.
         self._network = network.saveToString()
 
+    def _calc_num_threads(self, df_size: int, query_size: int):
+        num_queries = df_size * query_size
 
-    def query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[], num_threads=mp.cpu_count() - 2):
+        max = mp.cpu_count() - 2
+        calc = int(num_queries / 5000)
+        if calc > max:
+            return max
+
+        if calc <= 1:
+            if num_queries > 1000:
+                return 2
+
+            return 1
+
+        return calc
+
+
+    def query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
 
         if not hasattr(queries, "__getitem__"):
             queries = [queries]
@@ -334,17 +350,18 @@ class BatchQuery:
         logger = self._logger
         conn = self._datastore.get_connection()
         table = self._datastore.table
-        if len(self._datastore.data) < 1000:
+        processes = self._calc_num_threads(len(self._datastore.data), len(queries))
+        if processes == 1:
             pdf = pd.DataFrame(_batch_query(self._datastore.data, conn, nt, table,
                          variable_references, queries,
                          logger, 0))
         else:
-            with mp.Pool(processes=num_threads) as pool:
+            with mp.Pool(processes=processes) as pool:
                 pdf = pd.DataFrame()
-                for resultset in pool.map(lambda df: _batch_query(df, conn, nt, table,
+                for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
                                                                  variable_references, queries,
-                                                                logger, 0), np.array_split(self._datastore.data, mp.cpu_count())):
-                    pdf = pdf.append(pd.DataFrame(resultset))
+                                                                logger, 0), np.array_split(self._datastore.data, processes)):
+                    pdf = pdf.append(pd.DataFrame(result_set))
 
         df = pdf.set_index('caseid')
 
@@ -380,7 +397,7 @@ class NetworkModel:
         """
         Train a model on data provided in the constructor
         """
-        learning = bayesServerParams().ParameterLearning(self._jnetwork, self._inference_factory.inference_factory)
+        learning = bayesServerParams().ParameterLearning(self._jnetwork, self._inference_factory.get_inference_factory())
         learning_options = bayesServerParams().ParameterLearningOptions()
 
         data_reader_command = self._data_store.create_data_reader_command()
