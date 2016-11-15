@@ -264,7 +264,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
                  variable_references: List[str],
                  queries, logger, i):
 
-    bayespy.jni.attach()
+    bayespy.jni.attach_thread()
     network = bayespy.network.create_network_from_string(network)
 
     reader_options = bayesServer().data.ReaderOptions("ix")
@@ -324,21 +324,30 @@ class BatchQuery:
         # serialise the network as a string.
         self._network = network.saveToString()
 
-    def _calc_num_threads(self, df_size: int, query_size: int):
+    def _calc_num_threads(self, df_size: int, query_size: int) -> int:
         num_queries = df_size * query_size
 
-        max = mp.cpu_count() - 2
+        if mp.cpu_count() == 2:
+            max = 2
+        else:
+            max = mp.cpu_count() - 1
+
         calc = int(num_queries / 5000)
         if calc > max:
-            return max
-
-        if calc <= 1:
+            r = max
+        elif calc <= 1:
             if num_queries > 1000:
-                return 2
+                r = 2
+            else:
+                r = 1
+        else:
+            r = calc
 
-            return 1
+        if r <= 1:
+            r = 1
 
-        return calc
+        return r
+
 
 
     def query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
@@ -351,6 +360,9 @@ class BatchQuery:
         conn = self._datastore.get_connection()
         table = self._datastore.table
         processes = self._calc_num_threads(len(self._datastore.data), len(queries))
+
+        self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
+
         if processes == 1:
             pdf = pd.DataFrame(_batch_query(self._datastore.data, conn, nt, table,
                          variable_references, queries,

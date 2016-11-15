@@ -3,6 +3,10 @@ import os
 import bayespy.utils
 import platform
 
+def attach_thread():
+    if not jp.isThreadAttachedToJVM():
+        jp.attachThreadToJVM()
+
 def attach():
     if not jp.isJVMStarted():
         path_to_package = bayespy.utils.get_path_to_parent_dir(__file__)
@@ -16,8 +20,7 @@ def attach():
         jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx6g")
 
         # so it doesn't crash if called by a Python thread.
-        if not jp.isThreadAttachedToJVM():
-            jp.attachThreadToJVM()
+        attach_thread()
 
 def detach():
     if jp.isThreadAttachedToJVM():
