@@ -3,11 +3,16 @@ import os
 import bayespy.utils
 import platform
 
-def attach_thread():
+def attach_thread(logger=None):
     if not jp.isThreadAttachedToJVM():
+        if logger is not None:
+            logger.debug("Attaching thread to JVM")
         jp.attachThreadToJVM()
 
-def attach():
+def attach(logger=None):
+    if logger is not None:
+        logger.debug("JVM Started: {}".format(jp.isJVMStarted()))
+
     if not jp.isJVMStarted():
         path_to_package = bayespy.utils.get_path_to_parent_dir(__file__)
         separator = ";"
@@ -17,10 +22,15 @@ def attach():
         classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-7.8.jar'),
                                            os.path.join(path_to_package, 'bin/sqlite-jdbc-3.8.11.2.jar'))
 
-        jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx6g")
+        if logger is not None:
+             logger.debug("Starting JVM ({})...".format(classpath))
 
+        jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx1g")
+
+        if logger is not None:
+             logger.debug("JVM Started.")
         # so it doesn't crash if called by a Python thread.
-        attach_thread()
+    attach_thread(logger)
 
 def detach():
     if jp.isThreadAttachedToJVM():
