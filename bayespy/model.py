@@ -14,7 +14,10 @@ from bayespy.jni import bayesServerParams
 from bayespy.jni import jp
 import numpy as np
 import logging
+from pathos.multiprocessing import ProcessPool
+import multiprocess.context as ctx
 import pathos.multiprocessing as mp
+
 from typing import List
 
 class QueryOutput:
@@ -264,16 +267,16 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
                  variable_references: List[str],
                  queries, logger, i):
 
-    bayespy.jni.attach_thread()
-    network = bayespy.network.create_network_from_string(network)
+    bayespy.jni.attach(logger)
+    data_reader = bayesServer().data.DatabaseDataReaderCommand(
+        connection_string,
+        "select * from {} where ix in ({})".format(table_name,
+                                                   ",".join(str(i) for i in df.index.tolist()))).executeReader()
 
+    network = bayespy.network.create_network_from_string(network)
     reader_options = bayesServer().data.ReaderOptions("ix")
     variable_refs = list(bayespy.network.create_variable_references(network, df,
                                                                     variable_references=variable_references))
-
-    data_reader = bayesServer().data.DatabaseDataReaderCommand(
-        connection_string,
-        "select * from {} where ix in ({})".format(table_name, ",".join(str(i) for i in df.index.tolist()))).executeReader()
 
     reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
                                                    reader_options)
@@ -312,7 +315,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
     finally:
         reader.close()
         #bayespy.jni.detach()
-        return results
+    return results
 
 
 class BatchQuery:
@@ -327,8 +330,8 @@ class BatchQuery:
     def _calc_num_threads(self, df_size: int, query_size: int) -> int:
         num_queries = df_size * query_size
 
-        if mp.cpu_count() == 2:
-            max = 2
+        if mp.cpu_count() == 1:
+            max = 1
         else:
             max = mp.cpu_count() - 1
 
@@ -342,9 +345,6 @@ class BatchQuery:
                 r = 1
         else:
             r = calc
-
-        if r <= 1:
-            r = 1
 
         return r
 
@@ -368,7 +368,10 @@ class BatchQuery:
                          variable_references, queries,
                          logger, 0))
         else:
-            with mp.Pool(processes=processes) as pool:
+            # bit nasty, but the only way I could get jpype to stop hanging in Linux.
+            ctx._force_start_method('spawn')
+
+            with ProcessPool(nodes=processes) as pool:
                 pdf = pd.DataFrame()
                 for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
                                                                  variable_references, queries,
