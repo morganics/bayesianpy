@@ -4,9 +4,8 @@ import uuid
 from bayespy.jni import *
 from bayespy.data import DataFrame
 import shutil
-from bayespy.model import NetworkModel
 import os
-import numpy as np
+
 
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
