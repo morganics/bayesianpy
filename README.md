@@ -1,36 +1,51 @@
 # BayesPy
 
-A Python SDK for (primarily) feature selection using the BayesServer Java API
+A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1.
 
-# Example Usage on Titanic
+Supported functionality (currently only supports contemporal networks, although Bayes Server supports temporal networks as well):
+
+ - Creating network structures (in network.py and template.py, discrete/ continuous/ discretised/ multivariate nodes)
+ - Training a model (in model.py)
+ - Querying a model with common query types such as LogLikelihood/ conflict queries, joint probabilities for both continuous and discrete variables (in model.py, allows for multiprocessing as well to speed up query times)
+ - AutoInsight (using difference queries to understand variables' significance to the model, in insight.py)
+ - Various utility functions for reading dataframes, casting and generally mapping between dataframes -> SQLlite -> Bayes Server.
+ 
+Note: I believe there is now an in-memory implementation for mapping between dataframes and Bayes Server, however the SDK currently writes data to an SQLlite database which is then read by the Java API.
+
+# Example; training a model from a template:
 
 ``` python
-logger = logging.getLogger('variable_selection_wrapper')
-logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.DEBUG)
 
-# get a good guess as to whether the variable is discrete/ continuous
-auto = bayespy.data.AutoType(titanic)
+logger = logging.getLogger()
 
-# create the network factory that can be used to instantiate new networks
-with bayespy.network.NetworkFactory(titanic, logger) as network_factory:
-    # create the insight model
-    insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())],         continuous=titanic[list(auto.get_continuous_variables())])
+# utility function to decide on whether variables are discrete/ continuous
+# df is a pandas dataframe.
+auto = bayespy.data.AutoType(df)
 
-    # iterate over the best combination of variables by assessing lots of combinations of comparison queries
-    results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
+# creates a template to create a single discrete cluster (latent) node with edges to independent 
+# child nodes
+tpl = bayespy.template.MixtureNaiveBayes(logger,
+                                                 discrete=df[list(auto.get_discrete_variables())],
+                                                 continuous=df[list(auto.get_continuous_variables())],
+                                                 latent_states=8)
 
-    # results here is a list of dicts, containing the keys: probability (the percentage of cases that the model accounts for), model (the trained model), evidence (the names of the variable+states).
-
-    sorted_combos = sorted(top_variable_combinations, key=lambda x: x['probability'], reverse=True)
-    top_combos = [(sc['evidence'], sc['probability']) for sc in sorted_combos if sc['probability'] > 0.89]
+with bayespy.network.NetworkFactory(df, self._db_folder, self._logger) as nf:
+    model = bayespy.model.NetworkModel(tpl.create(nf), nf.get_datastore(), logger)
+    model.train()
+    model.save("model.bayes")
 ```
 
-# Namespaces
+# Example; querying a model:
+``` python
 
-1. Data - Python data related tasks, AutoType, DataFrame utility methods etc
-2. JNI - The Java/ JPype Python bridge setup
-3. ML - Not used much at the moment, but 'wrapper' approaches for iterative variable selection
-4. Model - the trained model used for querying
-5. Network - network creation / structural classes
-6. Visual - Classes for visualising the queries
+with bayespy.network.NetworkFactory(df, self._db_folder, logger, network_file_path='model.bayes') as nf:
+    model = bayespy.model.NetworkModel(nf.create(), nf.get_datastore(), logger)
+    
+    # Get the loglikelihood of the model given the evidence specified in df (here, using the same data as was trained upon)
+    # Can also specify to calculate conflict, if required.
+    # 'results' is a pandas dataframe, where each variable in df will have an additional column with a suffix of _loglikelihood.
+    results = model.batch_query(bayespy.model.QueryModelStatistics())
+        
+```    
+   
+
