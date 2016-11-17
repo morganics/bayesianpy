@@ -12,7 +12,7 @@ Supported functionality (currently only supports contemporal networks, although 
  
 Note: I believe there is now an in-memory implementation for mapping between dataframes and Bayes Server, however the SDK currently writes data to an SQLlite database which is then read by the Java API.
 
-# Example; training a model from a template:
+## Example: training a model from a template
 
 ``` python
 
@@ -29,23 +29,27 @@ tpl = bayespy.template.MixtureNaiveBayes(logger,
                                                  continuous=df[list(auto.get_continuous_variables())],
                                                  latent_states=8)
 
-with bayespy.network.NetworkFactory(df, self._db_folder, self._logger) as nf:
-    model = bayespy.model.NetworkModel(tpl.create(nf), nf.get_datastore(), logger)
+network_factory = bayespy.network.NetworkFactory(logger)
+with bayespy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayespy.model.NetworkModel(tpl.create(network_factory), dataset, logger)
     model.train()
     model.save("model.bayes")
 ```
 
-# Example; querying a model:
+## Example: querying a model
 ``` python
 
-with bayespy.network.NetworkFactory(df, self._db_folder, logger, network_file_path='model.bayes') as nf:
-    model = bayespy.model.NetworkModel(nf.create(), nf.get_datastore(), logger)
-    
+# specify the filename of the trained model
+network_factory = bayespy.network.NetworkFactory(logger, network_file_path='model.bayes')
+with bayespy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayespy.model.NetworkModel(network_factory.create(), dataset, logger)    
     # Get the loglikelihood of the model given the evidence specified in df (here, using the same data as was trained upon)
     # Can also specify to calculate conflict, if required.
     # 'results' is a pandas dataframe, where each variable in df will have an additional column with a suffix of _loglikelihood.
     results = model.batch_query(bayespy.model.QueryModelStatistics())
         
 ```    
-   
+## More examples
+
+A classification and regression example are included in the examples folder on the Titanic dataset. I'll try and put some more up shortly. 
 
