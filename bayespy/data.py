@@ -1,7 +1,13 @@
+from typing import List
+
 import numpy as np
-from bayespy.jni import *
 import logging
 import pandas as pd
+from sqlalchemy import create_engine
+import uuid
+import shutil
+from bayespy.jni import bayesServer, bayesServerAnalysis, bayesServerDiscovery, jp
+import os
 
 class DataFrameReader:
     def __init__(self, df):
@@ -202,6 +208,69 @@ def create_histogram(series):
         values.append(v)
 
     return bayesServerAnalysis().HistogramDensity.learn(jp.java.util.Arrays.asList(values), hdo)
+
+class DataSet:
+    def __init__(self, df: pd.DataFrame, db_folder: str, logger: logging.Logger, identifier:str=None):
+        if identifier is None:
+            self.uuid = str(uuid.uuid4()).replace("-","")
+        else:
+            self.uuid = identifier
+
+        self._db_dir = db_folder
+        self._create_folder()
+        filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
+        self._engine = create_engine(filename)
+        self.table = "table_" + self.uuid
+        self._logger = logger
+        self.data = df
+
+    def subset(self, indices:List[int]):
+        return DataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
+
+    def get_dataframe(self):
+        return self.data
+
+    def get_connection(self):
+        return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
+
+    def _create_folder(self):
+        if not os.path.exists(os.path.join(self._db_dir, "db")):
+            os.makedirs(os.path.join(self._db_dir, "db"))
+
+    def write(self):
+        self._logger.info("Writing {} rows to storage".format(len(self.data)))
+        self.data.to_sql(self.table, self._engine, if_exists='replace', index_label='ix', index=True)
+        self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
+
+    def create_data_reader_command(self, indexes=[]):
+        """
+        Get the data reader
+        :param indexes: training/ testing indexes
+        :return: a a DatabaseDataReaderCommand
+        """
+
+        if len(indexes) == 0:
+            indexes = self.get_dataframe().index.tolist()
+
+        data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
+            self.get_connection(),
+            "select * from {} where ix in ({})".format(self.table, ",".join(str(i) for i in indexes)))
+
+        return data_reader_command
+
+    def cleanup(self):
+        self._logger.debug("Cleaning up: deleting db folder")
+        try:
+            shutil.rmtree(os.path.join(self._db_dir, "db"))
+        except:
+            self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
+
+    def __enter__(self):
+        self.write()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.cleanup()
 
 def as_probability(series, output_column='cdf'):
     hist = create_histogram(series)

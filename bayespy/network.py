@@ -1,9 +1,7 @@
 import pandas as pd
-from sqlalchemy import create_engine
 import uuid
 from bayespy.jni import *
 from bayespy.data import DataFrame
-import shutil
 import os
 
 
@@ -378,7 +376,19 @@ def remove_continuous_nodes(network):
 
     return n
 
+def get_continuous_variables(network):
+    for variable in network.getVariables():
+        if bayespy.network.is_variable_continuous(variable):
+            yield variable
+
+def get_discrete_variables(network):
+    for variable in network.getVariables():
+        if bayespy.network.is_variable_discrete(variable):
+            yield variable
+
 def remove_node(network, node):
+    if node is None:
+        raise ValueError("Node must be specified when trying to remove it.")
     network.getNodes().remove(node)
 
 def get_number_of_states(network, variable):
@@ -455,76 +465,11 @@ def is_trained(network):
     return True
 
 
-class DataStore:
-    def __init__(self, logger, db_folder, dataframe):
-        self.uuid = str(uuid.uuid4()).replace("-","")
-        self._db_dir = os.path.join(db_folder, "db")
-        self._create_folder()
-        filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, self.uuid))
-        self._engine = create_engine(filename)
-        self.table = "table_" + self.uuid
-        self._logger = logger
-        self.data = dataframe
-
-    def get_dataframe(self):
-        return self.data
-
-    def get_connection(self):
-        return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, self.uuid))
-
-    def _create_folder(self):
-        if not os.path.exists(self._db_dir):
-            os.makedirs(self._db_dir)
-
-    def write(self):
-        self._logger.info("Writing {} rows to storage".format(len(self.data)))
-        self.data.to_sql(self.table, self._engine, if_exists='replace', index_label='ix', index=True)
-        self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
-
-    def create_data_reader_command(self, indexes=[]):
-        """
-        Get the data reader
-        :param indexes: training/ testing indexes
-        :return: a a DatabaseDataReaderCommand
-        """
-
-        if len(indexes) == 0:
-            indexes = self.get_dataframe().index.tolist()
-
-        data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
-            self.get_connection(),
-            "select * from {} where ix in ({})".format(self.table, ",".join(str(i) for i in indexes)))
-
-        return data_reader_command
-
-    def cleanup(self):
-        self._logger.debug("Cleaning up: deleting db folder")
-        try:
-            shutil.rmtree(self._db_dir)
-        except:
-            self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
-
 class NetworkFactory:
-    def __init__(self, data, db_folder, logger, network_file_path = None, network = None) -> object:
+    def __init__(self, logger, network_file_path = None, network = None):
         self._logger = logger
-        self._data = data
         self._network_file_path = network_file_path
-        self._db_folder = db_folder
         self._network = network
-
-    def reset_dataframe(self, df):
-        self._data = df
-
-    def _write_data(self):
-        ds = DataStore(self._logger, self._db_folder, self._data)
-        ds.write()
-        self._datastore = ds
-
-    def get_datastore(self):
-        return self._datastore
-
-    def get_data(self):
-        return self._data
 
     def create_from_file(self, path):
         return create_network_from_file(path)
@@ -536,14 +481,3 @@ class NetworkFactory:
             return create_network()
         else:
             return self.create_from_file(self._network_file_path)
-
-    def cleanup(self):
-        self._datastore.cleanup()
-
-    def __enter__(self):
-        self._write_data()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.cleanup()
-        #pass
