@@ -239,12 +239,13 @@ class QueryLogLikelihood:
         return result
 
 class QueryMeanVariance:
-    def __init__(self, variable_name, retract_evidence=True, result_mean_suffix='_mean', result_variance_suffix='_variance'):
+    def __init__(self, variable_name, retract_evidence=True, result_mean_suffix='_mean', result_variance_suffix='_variance', output_dtype=None):
         self._variable_name = variable_name
 
         self._result_mean_suffix = result_mean_suffix
         self._result_variance_suffix = result_variance_suffix
         self._retract_evidence = retract_evidence
+        self._output_dtype = output_dtype
 
     def setup(self, network, inference_engine, query_options):
         self._variable = bayespy.network.get_variable(network, self._variable_name)
@@ -260,7 +261,11 @@ class QueryMeanVariance:
         inference_engine.getQueryDistributions().add(bayesServerInference().QueryDistribution(self._query))
 
     def results(self, inference_engine, query_output):
-        return {self._variable_name + self._result_mean_suffix: self._query.getMean(self._variable),
+        mean = self._query.getMean(self._variable)
+        if self._output_dtype is not None:
+            mean = bayespy.data.DataFrame.cast2(self._output_dtype, mean)
+
+        return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
 
 def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_name: str,
@@ -348,8 +353,6 @@ class BatchQuery:
 
         return r
 
-
-
     def query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
 
         if not hasattr(queries, "__getitem__"):
@@ -388,7 +391,7 @@ class BatchQuery:
 
 class NetworkModel:
 
-    def __init__(self, network, data_store, logger):
+    def __init__(self, network, data_store: bayespy.data.DataSet, logger):
         self._jnetwork = network
         self._inference_factory = InferenceEngine(network)
         self._data_store = data_store
@@ -428,10 +431,10 @@ class NetworkModel:
         result = learning.learn(evidence_reader_command, learning_options)
         self._logger.info("Finished training model")
 
-        return {'Converged': result.getConverged(), 'Loglikelihood': result.getLogLikelihood().floatValue(),
-                    'IterationCount': result.getIterationCount(), 'CaseCount': result.getCaseCount(),
-                    'WeightedCaseCount': result.getWeightedCaseCount(), 'UnweightedCaseCount':  result.getUnweightedCaseCount(),
-                    'BIC': result.getBIC().floatValue()}
+        return {'network': self._jnetwork, 'converged': result.getConverged(), 'loglikelihood': result.getLogLikelihood().floatValue(),
+                    'iteration_count': result.getIterationCount(), 'case_count': result.getCaseCount(),
+                    'weighted_case_count': result.getWeightedCaseCount(), 'unweighted_case_count':  result.getUnweightedCaseCount(),
+                    'bic': result.getBIC().floatValue()}
 
 
     def batch_query(self, queries=[QueryStatistics()], append_to_df=True, variable_references=[]):
