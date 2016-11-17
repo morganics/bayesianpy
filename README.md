@@ -1,36 +1,59 @@
 # BayesPy
 
-A Python SDK for (primarily) feature selection using the BayesServer Java API
+A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1. This wrapper is not released/ supported/ endorsed by Bayes Server.
 
-# Example Usage on Titanic
+Supported functionality (currently only supports contemporal networks, although Bayes Server supports temporal networks as well):
+
+ - Creating network structures (in network.py and template.py, discrete/ continuous/ discretised/ multivariate nodes)
+ - Training a model (in model.py)
+ - Querying a model with common query types such as LogLikelihood/ conflict queries, joint probabilities for both continuous and discrete variables (in model.py, allows for multiprocessing as well to speed up query times)
+ - AutoInsight (using difference queries to understand variables' significance to the model, in insight.py)
+ - Various utility functions for reading dataframes, casting and generally mapping between dataframes -> SQLlite -> Bayes Server.
+ 
+Note: I believe there is now an in-memory implementation for mapping between dataframes and Bayes Server, however the SDK currently writes data to an SQLlite database which is then read by the Java API.
+
+## Motivation
+
+Python is a simpler language to put together something quickly, the Bayes Server API is very powerful, and consequently can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is fairly stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
+
+## Example: training a model from a template
 
 ``` python
-logger = logging.getLogger('variable_selection_wrapper')
-logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.DEBUG)
 
-# get a good guess as to whether the variable is discrete/ continuous
-auto = bayespy.data.AutoType(titanic)
+logger = logging.getLogger()
 
-# create the network factory that can be used to instantiate new networks
-with bayespy.network.NetworkFactory(titanic, logger) as network_factory:
-    # create the insight model
-    insight = bayespy.insight.AutoInsight(network_factory, logger, discrete=titanic[list(auto.get_discrete_variables())],         continuous=titanic[list(auto.get_continuous_variables())])
+# utility function to decide on whether variables are discrete/ continuous
+# df is a pandas dataframe.
+auto = bayespy.data.AutoType(df)
 
-    # iterate over the best combination of variables by assessing lots of combinations of comparison queries
-    results = insight.query_variable_combinations(bayespy.network.Discrete("Survived", 0))
+# creates a template to create a single discrete cluster (latent) node with edges to independent 
+# child nodes
+tpl = bayespy.template.MixtureNaiveBayes(logger,
+                                                 discrete=df[list(auto.get_discrete_variables())],
+                                                 continuous=df[list(auto.get_continuous_variables())],
+                                                 latent_states=8)
 
-    # results here is a list of dicts, containing the keys: probability (the percentage of cases that the model accounts for), model (the trained model), evidence (the names of the variable+states).
-
-    sorted_combos = sorted(top_variable_combinations, key=lambda x: x['probability'], reverse=True)
-    top_combos = [(sc['evidence'], sc['probability']) for sc in sorted_combos if sc['probability'] > 0.89]
+network_factory = bayespy.network.NetworkFactory(logger)
+with bayespy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayespy.model.NetworkModel(tpl.create(network_factory), dataset, logger)
+    model.train()
+    model.save("model.bayes")
 ```
 
-# Namespaces
+## Example: querying a model
+``` python
 
-1. Data - Python data related tasks, AutoType, DataFrame utility methods etc
-2. JNI - The Java/ JPype Python bridge setup
-3. ML - Not used much at the moment, but 'wrapper' approaches for iterative variable selection
-4. Model - the trained model used for querying
-5. Network - network creation / structural classes
-6. Visual - Classes for visualising the queries
+# specify the filename of the trained model
+network_factory = bayespy.network.NetworkFactory(logger, network_file_path='model.bayes')
+with bayespy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayespy.model.NetworkModel(network_factory.create(), dataset, logger)    
+    # Get the loglikelihood of the model given the evidence specified in df (here, using the same data as was trained upon)
+    # Can also specify to calculate conflict, if required.
+    # 'results' is a pandas dataframe, where each variable in df will have an additional column with a suffix of _loglikelihood.
+    results = model.batch_query(bayespy.model.QueryModelStatistics())
+        
+```    
+## More examples
+
+A classification and regression example are included in the examples folder on the Titanic dataset. I'll try and put some more up shortly. 
+
