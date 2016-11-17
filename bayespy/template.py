@@ -2,8 +2,6 @@ from bayespy.network import Builder as builder
 import pandas as pd
 import bayespy.network
 from bayespy.jni import *
-import numpy as np
-
 
 
 class Template:
@@ -112,12 +110,12 @@ class AutoStructure(Template):
         self._data_store = data_store
         self._logger = logger
 
-    def learn(self):
+    def learn(self, network_factory: bayespy.network.NetworkFactory):
 
         data_reader_command = self._data_store.create_data_reader_command()
 
         reader_options = bayesServer().data.ReaderOptions()
-        network = self._template.create()
+        network = self._template.create(network_factory)
         network.getLinks().clear()
 
         variable_references = list(bayespy.network.create_variable_references(network, self._data_store.get_dataframe()))
@@ -142,7 +140,7 @@ class AutoStructure(Template):
     def create(self, network_factory: bayespy.network.NetworkFactory):
         network = self._template.create(network_factory)
 
-        for link in self.learn().getLinkOutputs():
+        for link in self.learn(network_factory).getLinkOutputs():
             try:
                 builder.create_link(network, link.getLink().getFrom().getName(), link.getLink().getTo().getName())
             except ValueError:
