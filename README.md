@@ -1,6 +1,6 @@
 # BayesPy
 
-A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1.
+A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1. This wrapper is not released/ supported/ endorsed by Bayes Server.
 
 Supported functionality (currently only supports contemporal networks, although Bayes Server supports temporal networks as well):
 
@@ -11,6 +11,10 @@ Supported functionality (currently only supports contemporal networks, although 
  - Various utility functions for reading dataframes, casting and generally mapping between dataframes -> SQLlite -> Bayes Server.
  
 Note: I believe there is now an in-memory implementation for mapping between dataframes and Bayes Server, however the SDK currently writes data to an SQLlite database which is then read by the Java API.
+
+## Motivation
+
+Python is a simpler language to put together something quickly, the Bayes Server API is very powerful, and consequently can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is fairly stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
 
 ## Example: training a model from a template
 
