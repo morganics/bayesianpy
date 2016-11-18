@@ -26,7 +26,7 @@ def get_cabin_floor_and_number(cabin):
 
 def main():
     db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
-    titanic = pd.read_csv(os.path.join(db_folder, "data/train.csv"))
+    titanic = pd.read_csv(os.path.join(db_folder, "data/titanic.csv"))
 
     titanic['Floor'], titanic['CabinNumber'] = zip(*titanic.Cabin.map(get_cabin_floor_and_number))
     titanic.CabinNumber = titanic.CabinNumber.astype(float)
