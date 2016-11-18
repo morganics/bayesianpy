@@ -368,17 +368,18 @@ class BatchQuery:
 
         if processes == 1:
             pdf = pd.DataFrame(_batch_query(self._datastore.data, conn, nt, table,
-                         variable_references, queries,
-                         logger, 0))
+                                            variable_references, queries,
+                                            logger, 0))
         else:
             # bit nasty, but the only way I could get jpype to stop hanging in Linux.
             ctx._force_start_method('spawn')
 
-            with ProcessPool(nodes=processes) as pool:
+            with mp.Pool(processes=processes) as pool:
                 pdf = pd.DataFrame()
                 for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
-                                                                 variable_references, queries,
-                                                                logger, 0), np.array_split(self._datastore.data, processes)):
+                                                                   variable_references, queries,
+                                                                   logger, 0),
+                                           np.array_split(self._datastore.data, processes)):
                     pdf = pdf.append(pd.DataFrame(result_set))
 
         df = pdf.set_index('caseid')
