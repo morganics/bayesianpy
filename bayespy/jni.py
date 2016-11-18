@@ -9,7 +9,7 @@ def attach_thread(logger=None):
             logger.debug("Attaching thread to JVM")
         jp.attachThreadToJVM()
 
-def attach(logger=None):
+def attach(logger=None, heap_space='6g'):
     if logger is not None:
         logger.debug("JVM Started: {}".format(jp.isJVMStarted()))
 
@@ -25,7 +25,7 @@ def attach(logger=None):
         if logger is not None:
              logger.debug("Starting JVM ({})...".format(classpath))
 
-        jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx1g")
+        jp.startJVM(jp.getDefaultJVMPath(), "-Djava.class.path={}".format(classpath), "-XX:-UseGCOverheadLimit", "-Xmx{}".format(heap_space))
 
         if logger is not None:
              logger.debug("JVM Started.")
