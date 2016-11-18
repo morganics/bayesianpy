@@ -14,19 +14,27 @@ from bayespy.jni import bayesServerParams
 from bayespy.jni import jp
 import numpy as np
 import logging
-from pathos.multiprocessing import ProcessPool
 import multiprocess.context as ctx
 import pathos.multiprocessing as mp
 
 from typing import List
+
 
 class QueryOutput:
     def __init__(self, continuous, discrete):
         self.continuous = continuous
         self.discrete = discrete
 
-class InferenceEngine:
 
+class QueryBase:
+    def setup(self, network, inference_engine, query_options) -> None:
+        pass
+
+    def results(self, inference_engine, query_output) -> dict:
+        pass
+
+
+class InferenceEngine:
     _inference_factory = None
 
     def __init__(self, network):

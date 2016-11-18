@@ -152,6 +152,12 @@ class Builder:
         return parent
 
     @staticmethod
+    def create_multivariate_continuous_node(network, variables, node_name):
+        n_ = bayesServer().Node(node_name, [bayesServer().Variable(v, bayesServer().VariableValueType.CONTINUOUS) for v in variables])
+        network.getNodes().add(n_)
+        return n_
+
+    @staticmethod
     def create_discrete_variable(network, data, node_name, states):
         n = Builder.try_get_node(network, node_name)
         if n is not None:
