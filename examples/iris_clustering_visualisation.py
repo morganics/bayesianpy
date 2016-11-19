@@ -107,7 +107,7 @@ def main():
 
         plot(head_variables, results_class)
 
-        query_type_cluster = bayespy.model.CustomQuery(
+        query_type_cluster = bayespy.model.GaussianMixtureQuery(
             head_variables=head_variables,
             tail_variables=['Cluster'])
 
