@@ -92,8 +92,8 @@ def main():
 
 
     with bayespy.data.DataSet(iris, db_folder, logger) as dataset:
-        model = bayespy.model.NetworkModel(network, dataset, logger)
-        model.train()
+        model = bayespy.model.NetworkModel(network, logger)
+        model.train(dataset)
 
         head_variables = ['sepal_length','sepal_width','petal_length','petal_width']
 

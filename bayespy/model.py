@@ -435,14 +435,26 @@ class BatchQuery:
         else:
             return df
 
+class TrainingResults:
+    def __init__(self, network, results: dict, logger: logging.Logger):
+        self._network = network
+        self._metrics = results
+        self._logger = logger
+
+    def get_metrics(self) -> dict:
+        return self._metrics
+
+    def get_network(self):
+        return self._network
+
+    def get_model(self):
+        return NetworkModel(self._network, self._logger)
 
 class NetworkModel:
-    def __init__(self, network, data_store: bayespy.data.DataSet, logger):
+    def __init__(self, network, logger):
         self._jnetwork = network
         self._inference_factory = InferenceEngine(network)
-        self._data_store = data_store
         self._logger = logger
-        self._data = data_store.data
 
     def get_network(self):
         return self._jnetwork
@@ -457,7 +469,7 @@ class NetworkModel:
     def is_trained(self):
         return bayespy.network.is_trained(self._jnetwork)
 
-    def train(self):
+    def train(self, dataset: bayespy.data.DataSet) -> TrainingResults:
         """
         Train a model on data provided in the constructor
         """
@@ -465,11 +477,11 @@ class NetworkModel:
                                                          self._inference_factory.get_inference_factory())
         learning_options = bayesServerParams().ParameterLearningOptions()
 
-        data_reader_command = self._data_store.create_data_reader_command()
+        data_reader_command = dataset.create_data_reader_command()
 
         reader_options = bayesServer().data.ReaderOptions()
 
-        variable_references = list(bayespy.network.create_variable_references(self._jnetwork, self._data))
+        variable_references = list(bayespy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
         evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command,
                                                                                   jp.java.util.Arrays.asList(
@@ -480,14 +492,14 @@ class NetworkModel:
         result = learning.learn(evidence_reader_command, learning_options)
         self._logger.info("Finished training model")
 
-        return {'network': self._jnetwork, 'converged': result.getConverged(),
+        return TrainingResults(self._jnetwork, {'converged': result.getConverged(),
                 'loglikelihood': result.getLogLikelihood().floatValue(),
                 'iteration_count': result.getIterationCount(), 'case_count': result.getCaseCount(),
                 'weighted_case_count': result.getWeightedCaseCount(),
                 'unweighted_case_count': result.getUnweightedCaseCount(),
-                'bic': result.getBIC().floatValue()}
+                'bic': result.getBIC().floatValue()}, self._logger)
 
-    def batch_query(self, queries: List[QueryBase] = [QueryStatistics()], append_to_df=True,
+    def batch_query(self, dataset: bayespy.data.DataSet, queries: List[QueryBase] = [QueryStatistics()], append_to_df=True,
                     variable_references: List[str] = []):
-        bq = BatchQuery(self._jnetwork, self._data_store, self._logger)
+        bq = BatchQuery(self._jnetwork, dataset, self._logger)
         return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references)

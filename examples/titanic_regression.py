@@ -67,17 +67,14 @@ def main():
         for k, (train_indexes, test_indexes) in enumerate(kf):
             model = bayespy.model.NetworkModel(
                             mixture_naive_bayes_tpl.create(network_factory),
-                            dataset.subset(train_indexes), logger)
+                            logger)
 
             # result contains a bunch of metrics regarding the training step
-            training_result = model.train()
-
-            # need to create a new model from the trained network, and use this to test the accuracy of the trained model.
-            test_model = bayespy.model.NetworkModel(training_result['network'], dataset.subset(test_indexes), logger)
+            model.train(dataset.subset(train_indexes))
 
             # note that we've not 'dropped' the target data anywhere, this will be retracted when it's queried,
             # by specifying query_options.setQueryEvidenceMode(bayesServerInference().QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
-            results = test_model.batch_query(bayespy.model.QueryMeanVariance("Fare", output_dtype=titanic['Age'].dtype))
+            results = model.batch_query(dataset.subset(test_indexes), [bayespy.model.QueryMeanVariance("Fare", output_dtype=titanic['Age'].dtype)])
 
             # Each query just appends a column/ columns on to the original dataframe, so results is the same as titanic.iloc[test_indexes],
             # with (in this case) one additional column called 'Fare_mean', joined to the original.

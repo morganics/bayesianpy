@@ -67,12 +67,10 @@ class LogLikelihoodAnalysis:
 
                     name = type(tpl).__name__ if names is None else type(tpl).__name__ + names[i]
 
-                    model = bayespy.model.NetworkModel(tpl.create(network_factory), dataset.subset(x_train), self._logger)
-                    model.train()
+                    model = bayespy.model.NetworkModel(tpl.create(network_factory), self._logger)
+                    model.train(dataset.subset(x_train))
 
-                    network = model.get_network()
-                    model = bayespy.model.NetworkModel(network, dataset.subset(x_test), self._logger)
-                    results = model.batch_query(bayespy.model.QueryStatistics(), append_to_df=False)
+                    results = model.batch_query(dataset.subset(x_test), [bayespy.model.QueryStatistics()], append_to_df=False)
                     ll[name].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
 
         return pd.DataFrame(ll)
