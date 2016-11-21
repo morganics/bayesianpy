@@ -37,7 +37,8 @@ def main():
         model = bayespy.model.NetworkModel(network,
                                            logger)
 
-        subset = dataset.subset(iris[(iris.iris_class == "Iris-versicolor") | (iris.iris_class == "Iris-virginica")].index.tolist()),
+
+        subset = dataset.subset(iris[(iris.iris_class == "Iris-versicolor") | (iris.iris_class == "Iris-virginica")].index.tolist())
 
         model.train(subset)
 

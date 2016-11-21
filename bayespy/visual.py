@@ -9,6 +9,7 @@ import matplotlib.mlab as mlab
 import numpy as np
 import uuid
 import os
+import pylab
 
 class NetworkLayout:
     def __init__(self, jnetwork):
@@ -17,7 +18,7 @@ class NetworkLayout:
         self._multiplier = 500
 
     def build_graph(self):
-        g = nx.Graph()
+        g = nx.DiGraph()
         for node in self._jnetwork.getNodes():
             g.add_node(node.getName())
 
@@ -27,6 +28,11 @@ class NetworkLayout:
             g.add_edge(fr, to)
 
         return g
+
+    def visualise(self, graph, pos):
+        nx.draw_networkx_nodes(graph, pos)
+        nx.draw(graph, pos, with_labels=True, node_size=2000, node_color='w')
+        pylab.show()
 
     def spring_layout(self, graph):
         pos = nx.spring_layout(graph,center=[0.5,0.5])
