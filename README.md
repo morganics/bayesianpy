@@ -20,6 +20,7 @@ Python is a simpler language to put together something quickly, the Bayes Server
 
 - [Titanic Classification example] (http://htmlpreview.github.io/?https://github.com/morganics/BayesPy/blob/master/examples/notebook/titanic_classification.slides.html) provides a brief walkthrough of how to construct a network and run a batch query while using cross validation
 - [Iris Anomaly detection example] (http://htmlpreview.github.io/?https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_anomaly_detection.slides.html) provides a brief walkthrough  training a manually crafted network, as well as a batch query to obtain the Log Likelihood information theoretic score from the trained model to assist in identifying 'abnormal' data.
+- [Iris cluster visualisation with covariance] (http://htmlpreview.github.io/?https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_gaussian_mixture.slides.html) provides a brief walkthrough  training a naive Bayes network followed by a fully connected Gaussian mixture model, and how the clustering/ classification is affected as a result.
 
 ## Example: training a model from a template
 
