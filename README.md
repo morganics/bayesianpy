@@ -16,6 +16,11 @@ Note: I believe there is now an in-memory implementation for mapping between dat
 
 Python is a simpler language to put together something quickly, the Bayes Server API is very powerful, and consequently can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is fairly stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
 
+## Jupyter examples
+
+- [Titanic Classification example] (http://htmlpreview.github.io/?https://github.com/morganics/BayesPy/blob/master/examples/notebook/titanic_classification.slides.html) provides a brief walkthrough of how to construct a network and run a batch query while using cross validation
+- [Iris Anomaly detection example] (http://htmlpreview.github.io/?https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_anomaly_detection.slides.html) provides a brief walkthrough  training a manually crafted network, as well as a batch query to obtain the Log Likelihood information theoretic score from the trained model to assist in identifying 'abnormal' data.
+
 ## Example: training a model from a template
 
 ``` python
