@@ -97,9 +97,9 @@ def main():
 
         head_variables = ['sepal_length','sepal_width','petal_length','petal_width']
 
-        query_type_class = bayespy.model.GaussianMixtureQuery(
+        query_type_class = bayespy.model.QueryMixtureOfGaussians(
             head_variables=head_variables,
-                tail_variables=['iris_class'])
+                tail_variables=['iris_class', 'Cluster'])
 
         (engine, _, _) = bayespy.model.InferenceEngine(network).create()
         query = bayespy.model.SingleQuery(network, engine, logger)
@@ -107,7 +107,7 @@ def main():
 
         plot(head_variables, results_class)
 
-        query_type_cluster = bayespy.model.GaussianMixtureQuery(
+        query_type_cluster = bayespy.model.QueryMixtureOfGaussians(
             head_variables=head_variables,
             tail_variables=['Cluster'])
 
