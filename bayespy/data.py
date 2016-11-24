@@ -173,7 +173,8 @@ class DataFrame:
     @staticmethod
     def replace_0_with_normal_dist(df: pd.DataFrame, columns):
         for col in columns:
-            df.loc[df[col] == 0, col] = df[col].apply(lambda x: np.random.normal(0, 3))
+            if col in df.columns:
+                df.loc[df[col] == 0, col] = df[col].apply(lambda x: np.random.normal(0, 3))
 
 class Filter:
     @staticmethod
