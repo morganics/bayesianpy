@@ -16,6 +16,7 @@ import numpy as np
 import logging
 import multiprocess.context as ctx
 import pathos.multiprocessing as mp
+import itertools
 
 from typing import List
 
@@ -81,19 +82,20 @@ class SingleQuery:
         for query in queries:
             query.setup(self._network, self._inference_engine, self._query_options)
 
-        result = {}
-
         try:
             self._inference_engine.query(self._query_options, self._query_output)
         except BaseException as e:
             self._logger.error(e)
 
+        results = []
         for query in queries:
-            result = {**result, **query.results(self._inference_engine, self._query_output)}
+            results.append(query.results(self._inference_engine, self._query_output))
 
         self._inference_engine.getEvidence().clear()
+        if len(queries) == 1:
+            return results[0]
 
-        return result
+        return results
 
 
 class Evidence:
@@ -136,7 +138,7 @@ class Evidence:
         return self._evidence
 
 
-class GaussianMixtureQuery(QueryBase):
+class QueryMixtureOfGaussians(QueryBase):
     def __init__(self, head_variables: List[str], tail_variables: List[str]):
         self._head_variables = head_variables
         self._tail_variables = tail_variables
@@ -164,24 +166,44 @@ class GaussianMixtureQuery(QueryBase):
         self._query_distribution = bayesServerInference().QueryDistribution(self._distribution)
         inference_engine.getQueryDistributions().add(self._query_distribution)
 
+    def _results(self, curr_tail_variables: List[str], inference_engine):
+        pass
+
     def results(self, inference_engine, query_output):
         result = {}
-        for t in self._tail_variables:
-            tv = bayespy.network.get_variable(self._network, t)
+        def state_generator(variables):
+            for v in variables:
+                tv = bayespy.network.get_variable(self._network, v)
+                yield [state for state in tv.getStates()]
 
-            for state in tv.getStates():
-                state_array = jp.JArray(state.getClass())(1)
-                state_array[0] = state
+        def is_covariant():
+            return len(self._head_variables) > 1
 
-                result.update({state.getName(): {'covariance': np.zeros((len(self._head_variables), len(self._head_variables))), 'mean': []}})
-                for i,h in enumerate(self._head_variables):
-                    v = bayespy.network.get_variable(self._network, h)
-                    mean = self._distribution.getMean(v, state_array)
-                    result[state.getName()]['mean'].append(mean)
+        for state_combinations in itertools.product(*state_generator(self._tail_variables)):
+
+            state_name = "_".join([state.getName() for state in state_combinations])
+            state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
+            for i, state in enumerate(state_combinations):
+                state_array[i] = state
+
+            result.update({state_name: {}})
+            if is_covariant():
+                result[state_name].update({'mean': [], 'covariance': np.zeros((len(self._head_variables), len(self._head_variables)))})
+            else:
+                result[state_name].update({'variance': np.nan, 'mean': np.nan })
+
+            for i,h in enumerate(self._head_variables):
+                v = bayespy.network.get_variable(self._network, h)
+                mean = self._distribution.getMean(v, state_array)
+                if is_covariant():
+                    result[state_name]['mean'].append(mean)
                     for j,h1 in enumerate(self._head_variables):
                         v1 = bayespy.network.get_variable(self._network, h1)
                         cov = self._distribution.getCovariance(v, v1, state_array)
-                        result[state.getName()]['covariance'][i,j] = cov
+                        result[state_name]['covariance'][i,j] = cov
+                else:
+                    result[state_name]['mean'] = mean
+                    result[state_name]['variance'] = self._distribution.getVariance(v, state_array)
 
         return result
 
@@ -250,6 +272,20 @@ class QueryMostLikelyState(QueryBase):
         max_state_name = bayespy.data.DataFrame.cast2(self._output_dtype, max_state)
 
         return {self._target_variable_name + self._suffix: max_state_name}
+
+class QueryStateProbability(QueryMostLikelyState):
+
+    def __init__(self, target_variable_name, suffix="_probability"):
+        super().__init__(target_variable_name=target_variable_name, output_dtype="float64", suffix=suffix)
+
+    def results(self, inference_engine, query_output):
+        states = {}
+        for state in self._variable.getStates():
+            p = self._distribution.get([state])
+            states.update({self._target_variable_name + bayespy.network.STATE_DELIMITER + state.getName()
+                           + self._suffix: p})
+
+        return states
 
 
 class QueryLogLikelihood(QueryBase):
@@ -499,7 +535,7 @@ class NetworkModel:
                 'unweighted_case_count': result.getUnweightedCaseCount(),
                 'bic': result.getBIC().floatValue()}, self._logger)
 
-    def batch_query(self, dataset: bayespy.data.DataSet, queries: List[QueryBase] = [QueryStatistics()], append_to_df=True,
+    def batch_query(self, dataset: bayespy.data.DataSet, queries: List[QueryBase], append_to_df=True,
                     variable_references: List[str] = []):
         bq = BatchQuery(self._jnetwork, dataset, self._logger)
         return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references)
