@@ -54,3 +54,6 @@ def bayesServerDiscovery():
 def bayesServerStructure():
     return jp.JPackage("com.bayesserver.learning.structure")
 
+def bayesServerSampling():
+    return jp.JPackage("com.bayesserver.data.sampling")
+
