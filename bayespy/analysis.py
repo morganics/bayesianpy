@@ -26,19 +26,6 @@ def _fmeasure(tp, fp, fn, tn):
     fmeasure = 2 * (specificity * sensitivity) / (specificity + sensitivity)
     return { 'sensitivity': sensitivity, 'specificity': specificity, 'fmeasure': fmeasure }
 
-
-class TemplateFactory:
-
-    def __init__(self, creator_func, logger: logging.Logger, discrete=[], continuous=[]):
-        self._creator_func = creator_func
-        self._discrete = discrete
-        self._continuous = continuous
-        self._logger = logger
-
-    def build(self, training_data: pd.DataFrame) -> bayespy.template.Template:
-        return self._creator_func(training_data[self._discrete], training_data[self._continuous], self._logger)
-
-
 class LogLikelihoodAnalysis:
     """
     Used for comparing models, when looking for the minimum loglikelihood value for different configurations.
@@ -46,12 +33,12 @@ class LogLikelihoodAnalysis:
     configurations.
     """
 
-    def __init__(self, logger):
-        self._shuffle = True
+    def __init__(self, logger, shuffle=True):
+        self._shuffle = shuffle
         self._logger = logger
-        pass
 
-    def analyse(self, df: pd.DataFrame, tpl_factories: Iterable[TemplateFactory], k=3, names: List[str] = None):
+    def analyse(self, df: pd.DataFrame, templates: Iterable[bayespy.template.Template], k=3, names: List[str] = None,
+                use_model_names=True):
         kf = KFold(df.shape[0], n_folds=k, shuffle=self._shuffle)
         db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
 
@@ -61,14 +48,17 @@ class LogLikelihoodAnalysis:
             for k, (train_indexes, test_indexes) in enumerate(kf):
                 x_train, x_test = train_indexes, test_indexes
 
-                for i, tpl_factory in enumerate(tpl_factories):
+                for i, tpl in enumerate(templates):
 
-                    tpl = tpl_factory.build(df)
-
-                    name = type(tpl).__name__ if names is None else type(tpl).__name__ + names[i]
+                    n = type(tpl).__name__ if use_model_names else ""
+                    name = n if names is None else n + names[i]
 
                     model = bayespy.model.NetworkModel(tpl.create(network_factory), self._logger)
-                    model.train(dataset.subset(x_train))
+                    try:
+                        model.train(dataset.subset(x_train))
+                    except BaseException as e:
+                        self._logger.warning(e)
+                        continue
 
                     results = model.batch_query(dataset.subset(x_test), [bayespy.model.QueryStatistics()], append_to_df=False)
                     ll[name].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
