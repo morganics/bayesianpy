@@ -4,7 +4,7 @@ from bayespy.network import Builder as builder
 
 import logging
 import os
-import math
+
 import numpy as np
 import scipy.stats as ss
 import matplotlib.pyplot as plt
@@ -29,16 +29,6 @@ def main():
     class_variable = builder.create_discrete_variable(network, iris, 'iris_class', iris['iris_class'].unique())
     builder.create_link(network, cluster, class_variable)
 
-    def plot(ax, head_variables, results):
-        for i, hv in enumerate(head_variables):
-            x = np.arange(iris[hv].min()-2, iris[hv].max()+2, 0.05)
-            pdfs = [ss.norm.pdf(x, results[k]['mean'], math.sqrt(results[k]['variance'])) for k, v in results.items()]
-            density = np.sum(np.array(pdfs), axis=0)
-            ax.plot(x, density, label='Joint pdf')
-            ax.set_ylabel("pdf")
-            for k, v in results.items():
-                sns.distplot(iris[iris.iris_class == k][hv], hist=False, label=k, ax=ax)
-
     head_variables = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
 
     with bayespy.data.DataSet(iris, db_folder, logger) as dataset:
@@ -51,11 +41,13 @@ def main():
 
         (engine, _, _) = bayespy.model.InferenceEngine(network).create()
         query = bayespy.model.SingleQuery(network, engine, logger)
-        results = query.query(queries)
+        results = query.query(queries, aslist=True)
+        jd = bayespy.visual.JointDistribution()
         fig = plt.figure(figsize=(10,10))
-        for i, r in enumerate(results):
+
+        for i, r in enumerate(list(results)):
             ax = fig.add_subplot(2, 2, i+1)
-            plot(ax, queries[i]._head_variables, r)
+            jd.plot_distribution_with_variance(ax, iris, queries[i].get_head_variables(), r)
 
         plt.show()
 

@@ -74,21 +74,23 @@ def main():
     class_variable = builder.create_discrete_variable(network, iris, 'iris_class', iris['iris_class'].unique())
     builder.create_link(network, cluster, class_variable)
 
+    jd = bayespy.visual.JointDistribution()
+
     def plot(head_variables, results):
+
+        fig = plt.figure(figsize=(10, 10))
+        n = len(head_variables)-1
+        total = n*(n+1)/2
+
+        k = 1
         for i, hv in enumerate(head_variables):
             for j in range(i + 1, len(head_variables)):
-                hv1 = head_variables[j]
-                plt.figure()
-                plt.plot(iris[hv].tolist(), iris[head_variables[j]].tolist(), 'bo')
-                plt.title("{} vs {}".format(hv, hv1))
-                for k, v in results.items():
-                    mean = results[k]['mean']
-                    cov = results[k]['covariance']
-                    c = np.array([[cov[i,i], cov[i,j]], [cov[j,i], cov[j,j]]], np.float64)
-                    plot_cov_ellipse(c, pos=(mean[i], mean[j]), nstd=3, alpha=0.5, color='green')
-                plt.xlim([iris[hv].min() - 3, iris[hv].max() + 3])
-                plt.ylim([iris[hv1].min() - 3, iris[hv1].max() + 3])
-                plt.show()
+                ax = fig.add_subplot(total/2, 2, k)
+                jd.plot_distribution_with_covariance(ax, iris,
+                                                       (head_variables[i], head_variables[j]), results)
+
+                k+=1
+        plt.show()
 
 
     with bayespy.data.DataSet(iris, db_folder, logger) as dataset:
