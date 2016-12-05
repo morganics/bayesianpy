@@ -17,6 +17,7 @@ import logging
 import multiprocess.context as ctx
 import pathos.multiprocessing as mp
 import itertools
+import math
 
 from typing import List
 
@@ -83,7 +84,7 @@ class SingleQuery:
         else:
             return pd.DataFrame(r)
 
-    def query(self, queries: List[QueryBase], evidence=None, clear_evidence=True):
+    def query(self, queries: List[QueryBase], evidence=None, clear_evidence=True, aslist=False):
         """
         Query a number of variables (if none, then query all variables in the network)
         :param variables: a list of variables, or none
@@ -107,7 +108,7 @@ class SingleQuery:
         if clear_evidence:
             self._inference_engine.getEvidence().clear()
 
-        if len(queries) == 1:
+        if len(queries) == 1 and not aslist:
             return results[0]
 
         return results
@@ -147,11 +148,98 @@ class Evidence:
         return self._evidence
 
 
+class Distribution:
+
+    def __init__(self, head_variables: List[str], tail_variables: List[str], states: List[str]):
+        self._tail_variables = tail_variables
+        self._states = states
+        self._head_variables = head_variables
+        self._key = self.pretty_print()
+        self._mean_values = []
+        self._variance_value = np.nan
+        self._mean_value = np.nan
+        self._covariance = np.zeros((len(self._head_variables), len(self._head_variables)))
+
+    def set_mean_variance(self, mean: float, variance: float):
+        self._mean_value = mean
+        self._variance_value = variance
+
+    def append_mean(self, mean: float):
+        self._mean_values.append(mean)
+
+    def set_covariance_value(self, i: int, j: int, covariance: float):
+        self._covariance[i, j] = covariance
+
+    def get_cov_by_variable(self, variable_i: str, variable_j: str) -> np.array:
+        i = self._head_variables.index(variable_i)
+        j = self._head_variables.index(variable_j)
+        c = self._covariance
+        return np.array([[c[i, i], c[i, j]], [c[j, i], c[j, j]]], np.float64)
+
+    def get_mean_by_variable(self, variable_i, variable_j) -> float:
+        i = self._head_variables.index(variable_i)
+        j = self._head_variables.index(variable_j)
+        return (self._mean_values[i], self._mean_values[j])
+
+    def get_mean(self) -> float:
+        return self._mean_value
+
+    def get_variance(self) -> float:
+        return self._variance_value
+
+    def get_std(self) -> float:
+        return math.sqrt(self.get_variance())
+
+    def get_covariance(self) -> np.array:
+        return self._covariance
+
+    def get_tail_variables(self) -> List[str]:
+        return self._tail_variables
+
+    def get_states(self) -> List[str]:
+        return self._states
+
+    def get_tail(self):
+        for i, v in enumerate(self._tail_variables):
+            yield (v, self._states[i])
+
+    def pretty_print(self) -> str:
+        return "P({} | {})".format(
+            ", ".join([v for v in self._head_variables]),
+            ", ".join("{}={}".format(v, self._states[i]) for i, v in enumerate(self._tail_variables))
+        )
+
+    def pretty_print_tail(self) -> str:
+        return ", ".join("{}={}".format(v, self._states[i]) for i, v in enumerate(self._tail_variables))
+
+    def is_covariant(self) -> bool:
+        return len(self._head_variables) > 1
+
+    def key(self) -> tuple:
+        return self._key
+
+    def __hash__(self):
+        return hash(self._key)
+
+    def __eq__(self, other):
+        return self._key == other.key()
+
+    def __ne__(self, other):
+        # Not strictly necessary, but to avoid having both x==y and x!=y
+        # True at the same time
+        return not (self == other)
+
 class QueryMixtureOfGaussians(QueryBase):
     def __init__(self, head_variables: List[str], tail_variables: List[str]):
         self._head_variables = head_variables
         self._tail_variables = tail_variables
         self._discrete_variables = []
+
+    def get_head_variables(self):
+        return self._head_variables
+
+    def get_tail_variables(self):
+        return self._tail_variables
 
     def setup(self, network, inference_engine, query_options):
         contexts = []
@@ -175,46 +263,36 @@ class QueryMixtureOfGaussians(QueryBase):
         self._query_distribution = bayesServerInference().QueryDistribution(self._distribution)
         inference_engine.getQueryDistributions().add(self._query_distribution)
 
-    def _results(self, curr_tail_variables: List[str], inference_engine):
-        pass
-
     def results(self, inference_engine, query_output):
-        result = {}
+        results = {}
         def state_generator(variables):
             for v in variables:
                 tv = bayespy.network.get_variable(self._network, v)
                 yield [state for state in tv.getStates()]
 
-        def is_covariant():
-            return len(self._head_variables) > 1
-
         for state_combinations in itertools.product(*state_generator(self._tail_variables)):
 
-            state_name = "_".join([state.getName() for state in state_combinations])
             state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
             for i, state in enumerate(state_combinations):
                 state_array[i] = state
 
-            result.update({state_name: {}})
-            if is_covariant():
-                result[state_name].update({'mean': [], 'covariance': np.zeros((len(self._head_variables), len(self._head_variables)))})
-            else:
-                result[state_name].update({'variance': np.nan, 'mean': np.nan })
+            dist = Distribution(self._head_variables, self._tail_variables,
+                                     [state.getName() for state in state_combinations])
 
             for i,h in enumerate(self._head_variables):
                 v = bayespy.network.get_variable(self._network, h)
                 mean = self._distribution.getMean(v, state_array)
-                if is_covariant():
-                    result[state_name]['mean'].append(mean)
+                if dist.is_covariant():
+                    dist.append_mean(mean)
                     for j,h1 in enumerate(self._head_variables):
                         v1 = bayespy.network.get_variable(self._network, h1)
                         cov = self._distribution.getCovariance(v, v1, state_array)
-                        result[state_name]['covariance'][i,j] = cov
+                        dist.set_covariance_value(i, j, cov)
                 else:
-                    result[state_name]['mean'] = mean
-                    result[state_name]['variance'] = self._distribution.getVariance(v, state_array)
+                    dist.set_mean_variance(mean, self._distribution.getVariance(v, state_array))
 
-        return result
+            results.update({dist.key(): dist})
+        return results
 
 
 class QueryStatistics(QueryBase):
