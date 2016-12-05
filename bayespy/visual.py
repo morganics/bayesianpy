@@ -1,5 +1,15 @@
 import networkx as nx
+import numpy as np
 from bayespy.jni import bayesServer
+
+import bayespy.data
+import pandas as pd
+
+import math
+import scipy.stats as ss
+from typing import List, Dict
+
+import logging
 
 class NetworkLayout:
     def __init__(self, jnetwork):
@@ -51,3 +61,138 @@ class NetworkLayout:
             if y < 0:
                 y = 0.0
             node.setBounds(bayesServer().Bounds(x, y, width, height))
+
+class JointDistribution:
+
+    # http://stackoverflow.com/questions/12301071/multidimensional-confidence-intervals
+    @staticmethod
+    def _plot_cov_ellipse(cov, pos, nstd=2, ax=None, **kwargs):
+        """
+        Plots an `nstd` sigma error ellipse based on the specified covariance
+        matrix (`cov`). Additional keyword arguments are passed on to the
+        ellipse patch artist.
+
+        Parameters
+        ----------
+            cov : The 2x2 covariance matrix to base the ellipse on
+            pos : The location of the center of the ellipse. Expects a 2-element
+                sequence of [x0, y0].
+            nstd : The radius of the ellipse in numbers of standard deviations.
+                Defaults to 2 standard deviations.
+            ax : The axis that the ellipse will be plotted on. Defaults to the
+                current axis.
+            Additional keyword arguments are pass on to the ellipse patch.
+
+        Returns
+        -------
+            A matplotlib ellipse artist
+        """
+        from matplotlib import pyplot as plt
+        from matplotlib.patches import Ellipse
+
+        def eigsorted(cov):
+            vals, vecs = np.linalg.eigh(cov)
+            order = vals.argsort()[::-1]
+            return vals[order], vecs[:, order]
+
+        if ax is None:
+            ax = plt.gca()
+
+        vals, vecs = eigsorted(cov)
+        theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+
+        # Width and height are "full" widths, not radius
+        width, height = 2 * nstd * np.sqrt(vals)
+        ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
+
+        ax.add_artist(ellip)
+        return ellip
+
+    def plot_distribution_with_variance(self, ax, df: pd.DataFrame, head_variables: List[str],
+                          results: Dict[str, bayespy.model.Distribution]):
+        import seaborn as sns
+        for i, hv in enumerate(head_variables):
+            x = np.arange(df[hv].min() - df[hv].std(), df[hv].max() + df[hv].std(), df[hv].max() - df[hv].min() / 1000)
+            pdfs = [ss.norm.pdf(x, results[k].get_mean(), results[k].get_std()) for k, v in results.items()]
+            density = np.sum(np.array(pdfs), axis=0)
+            ax.plot(x, density, label='Joint PDF', linestyle='dashed')
+            ax.set_ylabel("pdf")
+            for k, v in results.items():
+                s = df
+                for tv, st in v.get_tail():
+                    s = s[s[tv] == bayespy.data.DataFrame.cast2(s[tv].dtype, st)]
+
+                sns.distplot(s[hv], hist=False, label=v.pretty_print_tail(), ax=ax)
+
+            ax.set_ylim([0, np.max(pdfs)])
+
+    def plot_distribution_with_covariance(self, ax, df: pd.DataFrame, head_variables: tuple,
+                                          results: Dict[str, bayespy.model.Distribution]):
+
+        hv = head_variables
+
+        ax.plot(df[hv[0]].tolist(), df[hv[1]].tolist(), 'bo')
+        #ax.set_title("{} vs {}".format(hv[0], hv[1]))
+        for k, v in results.items():
+            self._plot_cov_ellipse(cov=v.get_cov_by_variable(hv[0], hv[1]),
+                                   pos=v.get_mean_by_variable(hv[0], hv[1]),
+                                   nstd=3, alpha=0.5, color='green', ax=ax)
+
+        ax.set_xlim([df[hv[0]].min() - 3, df[hv[0]].max() + 3])
+        ax.set_ylim([df[hv[1]].min() - 3, df[hv[1]].max() + 3])
+        ax.set_xlabel(hv[0])
+        ax.set_ylabel(hv[1])
+
+    def plot_with_variance(self, df: pd.DataFrame,
+                           head_variables: List[str],
+                           results: List[Dict[str, bayespy.model.Distribution]],
+                           plots_per_page=6):
+
+        import matplotlib.pyplot as plt
+        cols = 2 if len(head_variables) > 1 else 1
+        rows = math.ceil(len(head_variables) / cols)
+
+        for i, r in enumerate(results):
+            if i == 0 or k == plots_per_page:
+                k = 0
+                if i > 0:
+                    yield fig
+                    plt.close()
+                fig = plt.figure(figsize=(12, 12))
+                k += 1
+
+
+            ax = fig.add_subplot(rows, cols, i + 1)
+            self.plot_distribution_with_variance(ax, df, head_variables, r)
+
+        yield fig
+        plt.close()
+
+    def plot_with_covariance(self, df: pd.DataFrame,
+                             head_variables: List[str],
+                             results: Dict[str, bayespy.model.Distribution],
+                             plots_per_page=6):
+
+        import matplotlib.pyplot as plt
+
+        n = len(head_variables) - 1
+        cols = 2
+        total = (n * (n + 1) / 2) / cols
+
+        k = 0
+        for i, hv in enumerate(head_variables):
+            for j in range(i + 1, len(head_variables)):
+                if i == 0 or k == plots_per_page:
+                    k = 0
+                    if i > 0:
+                        yield fig
+                        plt.close()
+
+                    fig = plt.figure(figsize=(12, 12))
+                    k += 1
+
+                ax = fig.add_subplot(total / 2, 2, k)
+                self.plot_distribution_with_covariance(ax, df,
+                                        (head_variables[i], head_variables[j]), results)
+
+        yield fig
