@@ -229,7 +229,10 @@ class Distribution:
         # True at the same time
         return not (self == other)
 
-class QueryMixtureOfGaussians(QueryBase):
+
+
+
+class QueryConditionalJointProbability(QueryBase):
     def __init__(self, head_variables: List[str], tail_variables: List[str]):
         self._head_variables = head_variables
         self._tail_variables = tail_variables
@@ -294,6 +297,14 @@ class QueryMixtureOfGaussians(QueryBase):
             results.update({dist.key(): dist})
         return results
 
+
+class QueryJointProbability(QueryConditionalJointProbability):
+    def __init__(self, head_variables: List[str]):
+        super().__init__(head_variables, [])
+
+class QueryMixtureOfGaussians(QueryConditionalJointProbability):
+    def __init__(self, head_variables: List[str], tail_variables: List[str]):
+        super().__init__(head_variables, tail_variables)
 
 class QueryStatistics(QueryBase):
     def __init__(self, calc_loglikelihood=True, calc_conflict=False, loglikelihood_column='loglikelihood',

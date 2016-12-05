@@ -99,7 +99,7 @@ def main():
 
         head_variables = ['sepal_length','sepal_width','petal_length','petal_width']
 
-        query_type_class = bayespy.model.QueryMixtureOfGaussians(
+        query_type_class = bayespy.model.QueryConditionalJointProbability(
             head_variables=head_variables,
                 tail_variables=['iris_class', 'Cluster'])
 
@@ -109,7 +109,7 @@ def main():
 
         plot(head_variables, results_class)
 
-        query_type_cluster = bayespy.model.QueryMixtureOfGaussians(
+        query_type_cluster = bayespy.model.QueryConditionalJointProbability(
             head_variables=head_variables,
             tail_variables=['Cluster'])
 

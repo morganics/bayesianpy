@@ -35,7 +35,7 @@ def main():
         model = bayespy.model.NetworkModel(network, logger)
         model.train(dataset)
 
-        queries = [bayespy.model.QueryMixtureOfGaussians(
+        queries = [bayespy.model.QueryConditionalJointProbability(
                 head_variables=[v],
                     tail_variables=['iris_class']) for v in head_variables]
 
