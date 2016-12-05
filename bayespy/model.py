@@ -6,6 +6,7 @@ Created on Tue Apr 19 16:31:18 2016
 """
 
 from bayespy.jni import bayesServerInference
+from bayespy.decorators import deprecated
 
 import bayespy.network
 import pandas as pd
@@ -68,7 +69,7 @@ class InferenceEngine:
         return inference_engine, query_options, query_output
 
 
-class SingleQuery:
+class Query:
     def __init__(self, network, inference_engine, logger):
         self._factory = bayesServerInference().RelevanceTreeInferenceFactory()
         self._query_options = self._factory.createQueryOptions()
@@ -77,6 +78,9 @@ class SingleQuery:
         self._network = network
         self._logger = logger
 
+    def execute(self, queries: List[QueryBase], evidence=None, clear_evidence=True):
+        return self.query(queries, evidence=evidence, clear_evidence=clear_evidence, aslist=True)
+
     def query_as_df(self, queries: List[QueryBase], evidence=None, clear_evidence=True) -> pd.DataFrame:
         r = self.query(queries, evidence = evidence, clear_evidence = clear_evidence)
         if len(queries) == 1:
@@ -84,6 +88,7 @@ class SingleQuery:
         else:
             return pd.DataFrame(r)
 
+    @deprecated("Use 'execute' instead.")
     def query(self, queries: List[QueryBase], evidence=None, clear_evidence=True, aslist=False):
         """
         Query a number of variables (if none, then query all variables in the network)
@@ -113,6 +118,11 @@ class SingleQuery:
 
         return results
 
+
+@deprecated("Use 'Query' instead.")
+class SingleQuery(Query):
+    def __init__(self, network, inference_engine, logger):
+        super().__init__(network, inference_engine, logger)
 
 class Evidence:
     def __init__(self, network, inference):
@@ -230,8 +240,6 @@ class Distribution:
         return not (self == other)
 
 
-
-
 class QueryConditionalJointProbability(QueryBase):
     def __init__(self, head_variables: List[str], tail_variables: List[str]):
         self._head_variables = head_variables
@@ -302,9 +310,12 @@ class QueryJointProbability(QueryConditionalJointProbability):
     def __init__(self, head_variables: List[str]):
         super().__init__(head_variables, [])
 
+
+@deprecated("Use 'QueryConditionalJointProbability' or 'QueryJointProbability' instead.")
 class QueryMixtureOfGaussians(QueryConditionalJointProbability):
     def __init__(self, head_variables: List[str], tail_variables: List[str]):
         super().__init__(head_variables, tail_variables)
+
 
 class QueryStatistics(QueryBase):
     def __init__(self, calc_loglikelihood=True, calc_conflict=False, loglikelihood_column='loglikelihood',
@@ -370,6 +381,7 @@ class QueryMostLikelyState(QueryBase):
         max_state_name = bayespy.data.DataFrame.cast2(self._output_dtype, max_state)
 
         return {self._target_variable_name + self._suffix: max_state_name}
+
 
 class QueryStateProbability(QueryMostLikelyState):
 
@@ -569,6 +581,7 @@ class BatchQuery:
         else:
             return df
 
+
 class TrainingResults:
     def __init__(self, network, results: dict, logger: logging.Logger):
         self._network = network
@@ -605,6 +618,7 @@ class Sampling:
             results.append(r)
 
         return pd.DataFrame(results)
+
 
 class NetworkModel:
     def __init__(self, network, logger):
