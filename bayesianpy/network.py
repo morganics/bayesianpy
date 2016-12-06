@@ -60,6 +60,30 @@ class Builder:
         return network.getNodes().get(node)
 
     @staticmethod
+    def delete_link(network, n1, n2):
+        if isinstance(n1, str):
+            n1_name = n1
+            n1 = Builder.get_node(network, n1)
+
+        if isinstance(n2, str):
+            n2_name = n2
+            n2 = Builder.get_node(network, n2)
+
+        if n1 is None:
+            raise ValueError("N1 {} was not recognised".format(n1_name))
+
+        if n2 is None:
+            raise ValueError("N2 {} was not recognised".format(n2_name))
+
+        to_remove = None
+        for l in n1.getLinksOut():
+            if l.getTo() == n2:
+                to_remove = l
+
+        if to_remove is not None:
+            network.getLinks().remove(to_remove)
+
+    @staticmethod
     def create_link(network, n1, n2, t=None):
         if isinstance(n1, str):
             n1_name = n1
