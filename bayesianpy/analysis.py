@@ -1,7 +1,7 @@
 from sklearn.cross_validation import KFold
 import pandas as pd
-import bayespy.network
-from bayespy.jni import bayesServerAnalysis
+import bayesianpy.network
+from bayesianpy.jni import bayesServerAnalysis
 import numpy as np
 import logging
 from typing import Iterable, List
@@ -37,13 +37,13 @@ class LogLikelihoodAnalysis:
         self._shuffle = shuffle
         self._logger = logger
 
-    def analyse(self, df: pd.DataFrame, templates: Iterable[bayespy.template.Template], k=3, names: List[str] = None,
+    def analyse(self, df: pd.DataFrame, templates: Iterable[bayesianpy.template.Template], k=3, names: List[str] = None,
                 use_model_names=True):
         kf = KFold(df.shape[0], n_folds=k, shuffle=self._shuffle)
-        db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
+        db_folder = bayesianpy.utils.get_path_to_parent_dir(__file__)
 
-        network_factory = bayespy.network.NetworkFactory(self._logger)
-        with bayespy.data.DataSet(df, db_folder, self._logger) as dataset:
+        network_factory = bayesianpy.network.NetworkFactory(self._logger)
+        with bayesianpy.data.DataSet(df, db_folder, self._logger) as dataset:
             ll = defaultdict(list)
             for k, (train_indexes, test_indexes) in enumerate(kf):
                 x_train, x_test = train_indexes, test_indexes
@@ -53,14 +53,14 @@ class LogLikelihoodAnalysis:
                     n = type(tpl).__name__ if use_model_names else ""
                     name = n if names is None else n + names[i]
 
-                    model = bayespy.model.NetworkModel(tpl.create(network_factory), self._logger)
+                    model = bayesianpy.model.NetworkModel(tpl.create(network_factory), self._logger)
                     try:
                         model.train(dataset.subset(x_train))
                     except BaseException as e:
                         self._logger.warning(e)
                         continue
 
-                    results = model.batch_query(dataset.subset(x_test), [bayespy.model.QueryStatistics()], append_to_df=False)
+                    results = model.batch_query(dataset.subset(x_test), [bayesianpy.model.QueryStatistics()], append_to_df=False)
                     ll[name].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
 
         return pd.DataFrame(ll)

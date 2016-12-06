@@ -6,7 +6,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 import uuid
 import shutil
-from bayespy.jni import bayesServer, bayesServerAnalysis, bayesServerDiscovery, jp
+from bayesianpy.jni import bayesServer, bayesServerAnalysis, bayesServerDiscovery, jp
 import os
 
 class DataFrameReader:

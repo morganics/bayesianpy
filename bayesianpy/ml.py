@@ -1,4 +1,4 @@
-from bayespy.network import NetworkFactory
+from bayesianpy.network import NetworkFactory
 
 class Selector:
     def __init__(self, target, continuous=[], discrete=[]):

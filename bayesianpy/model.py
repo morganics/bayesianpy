@@ -5,14 +5,14 @@ Created on Tue Apr 19 16:31:18 2016
 @author: imorgan.admin
 """
 
-from bayespy.jni import bayesServerInference
-from bayespy.decorators import deprecated
+from bayesianpy.jni import bayesServerInference
+from bayesianpy.decorators import deprecated
 
-import bayespy.network
+import bayesianpy.network
 import pandas as pd
-from bayespy.jni import bayesServer
-from bayespy.jni import bayesServerParams
-from bayespy.jni import jp
+from bayesianpy.jni import bayesServer
+from bayesianpy.jni import bayesServerParams
+from bayesianpy.jni import jp
 import numpy as np
 import logging
 import multiprocess.context as ctx
@@ -141,7 +141,7 @@ class Evidence:
         """
         for key, value in evidence.items():
             v = self._variables.get(key)
-            if bayespy.network.is_variable_discrete(v):
+            if bayesianpy.network.is_variable_discrete(v):
                 if v is None:
                     raise ValueError("Node {} does not exist".format(key))
 
@@ -151,7 +151,7 @@ class Evidence:
 
                 self._evidence.setState(st)
 
-            elif bayespy.network.is_variable_continuous(v):
+            elif bayesianpy.network.is_variable_continuous(v):
                 self._evidence.set(v, jp.java.lang.Double(value))
 
 
@@ -255,9 +255,9 @@ class QueryConditionalJointProbability(QueryBase):
     def setup(self, network, inference_engine, query_options):
         contexts = []
         for h in self._head_variables + self._tail_variables:
-            v = bayespy.network.get_variable(network, h)
+            v = bayesianpy.network.get_variable(network, h)
 
-            if bayespy.network.is_variable_discrete(v):
+            if bayesianpy.network.is_variable_discrete(v):
                 if h in self._head_variables:
                     raise ValueError("Bayespy only supports discrete tail variables (BayesServer is fine with it though!)")
 
@@ -278,7 +278,7 @@ class QueryConditionalJointProbability(QueryBase):
         results = {}
         def state_generator(variables):
             for v in variables:
-                tv = bayespy.network.get_variable(self._network, v)
+                tv = bayesianpy.network.get_variable(self._network, v)
                 yield [state for state in tv.getStates()]
 
         for state_combinations in itertools.product(*state_generator(self._tail_variables)):
@@ -291,12 +291,12 @@ class QueryConditionalJointProbability(QueryBase):
                                      [state.getName() for state in state_combinations])
 
             for i,h in enumerate(self._head_variables):
-                v = bayespy.network.get_variable(self._network, h)
+                v = bayesianpy.network.get_variable(self._network, h)
                 mean = self._distribution.getMean(v, state_array)
                 if dist.is_covariant():
                     dist.append_mean(mean)
                     for j,h1 in enumerate(self._head_variables):
-                        v1 = bayespy.network.get_variable(self._network, h1)
+                        v1 = bayesianpy.network.get_variable(self._network, h1)
                         cov = self._distribution.getCovariance(v, v1, state_array)
                         dist.set_covariance_value(i, j, cov)
                 else:
@@ -357,9 +357,9 @@ class QueryMostLikelyState(QueryBase):
     def setup(self, network, inference_engine, query_options):
         distribution = None
 
-        self._variable = bayespy.network.get_variable(network, self._target_variable_name)
+        self._variable = bayesianpy.network.get_variable(network, self._target_variable_name)
 
-        if bayespy.network.is_variable_discrete(self._variable):
+        if bayesianpy.network.is_variable_discrete(self._variable):
             distribution = bayesServer().Table(self._variable)
 
         if distribution is None:
@@ -378,7 +378,7 @@ class QueryMostLikelyState(QueryBase):
 
         # get the most likely state
         max_state = max(states.keys(), key=(lambda key: states[key]))
-        max_state_name = bayespy.data.DataFrame.cast2(self._output_dtype, max_state)
+        max_state_name = bayesianpy.data.DataFrame.cast2(self._output_dtype, max_state)
 
         return {self._target_variable_name + self._suffix: max_state_name}
 
@@ -392,7 +392,7 @@ class QueryStateProbability(QueryMostLikelyState):
         states = {}
         for state in self._variable.getStates():
             p = self._distribution.get([state])
-            states.update({self._target_variable_name + bayespy.network.STATE_DELIMITER + state.getName()
+            states.update({self._target_variable_name + bayesianpy.network.STATE_DELIMITER + state.getName()
                            + self._suffix: p})
 
         return states
@@ -410,7 +410,7 @@ class QueryLogLikelihood(QueryBase):
         self._column_name = column_name
 
     def setup(self, network, inference_engine, query_options):
-        variables = [bayespy.network.get_variable(network, n) for n in self._variable_names]
+        variables = [bayesianpy.network.get_variable(network, n) for n in self._variable_names]
         if len(variables) == 1:
             self._distribution = bayesServer().CLGaussian(variables[0])
         else:
@@ -441,9 +441,9 @@ class QueryMeanVariance(QueryBase):
         self._output_dtype = output_dtype
 
     def setup(self, network, inference_engine, query_options):
-        self._variable = bayespy.network.get_variable(network, self._variable_name)
+        self._variable = bayesianpy.network.get_variable(network, self._variable_name)
 
-        if not bayespy.network.is_variable_continuous(self._variable):
+        if not bayesianpy.network.is_variable_continuous(self._variable):
             raise ValueError("{} needs to be continuous.".format(self._variable_name))
 
         self._query = bayesServer().CLGaussian(self._variable)
@@ -456,7 +456,7 @@ class QueryMeanVariance(QueryBase):
     def results(self, inference_engine, query_output):
         mean = self._query.getMean(self._variable)
         if self._output_dtype is not None:
-            mean = bayespy.data.DataFrame.cast2(self._output_dtype, mean)
+            mean = bayesianpy.data.DataFrame.cast2(self._output_dtype, mean)
 
         return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
@@ -465,16 +465,16 @@ class QueryMeanVariance(QueryBase):
 def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_name: str,
                  variable_references: List[str],
                  queries, logger, i):
-    bayespy.jni.attach(logger, heap_space='1g')
+    bayesianpy.jni.attach(logger, heap_space='1g')
     data_reader = bayesServer().data.DatabaseDataReaderCommand(
         connection_string,
         "select * from {} where ix in ({})".format(table_name,
                                                    ",".join(str(i) for i in df.index.tolist()))).executeReader()
 
-    network = bayespy.network.create_network_from_string(network)
+    network = bayesianpy.network.create_network_from_string(network)
     reader_options = bayesServer().data.ReaderOptions("ix")
-    variable_refs = list(bayespy.network.create_variable_references(network, df,
-                                                                    variable_references=variable_references))
+    variable_refs = list(bayesianpy.network.create_variable_references(network, df,
+                                                                       variable_references=variable_references))
 
     reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
                                                       reader_options)
@@ -601,12 +601,12 @@ class TrainingResults:
 class Sampling:
     def __init__(self, network):
         self._network = network
-        self._sampling = bayespy.jni.bayesServerSampling().DataSampler(self._network)
+        self._sampling = bayesianpy.jni.bayesServerSampling().DataSampler(self._network)
 
     def sample(self, num_samples: int=1):
         rand = jp.java.util.Random()
-        evidence = bayespy.jni.bayesServerInference().DefaultEvidence(self._network)
-        options = bayespy.jni.bayesServerSampling().DataSamplingOptions()
+        evidence = bayesianpy.jni.bayesServerInference().DefaultEvidence(self._network)
+        options = bayesianpy.jni.bayesServerSampling().DataSamplingOptions()
         results = []
         for i in range(num_samples):
             self._sampling.takeSample(evidence, rand, options)
@@ -637,9 +637,9 @@ class NetworkModel:
             fh.write(reparsed.toprettyxml(indent="  "))
 
     def is_trained(self):
-        return bayespy.network.is_trained(self._jnetwork)
+        return bayesianpy.network.is_trained(self._jnetwork)
 
-    def train(self, dataset: bayespy.data.DataSet) -> TrainingResults:
+    def train(self, dataset: bayesianpy.data.DataSet) -> TrainingResults:
         """
         Train a model on data provided in the constructor
         """
@@ -651,7 +651,7 @@ class NetworkModel:
 
         reader_options = bayesServer().data.ReaderOptions()
 
-        variable_references = list(bayespy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
+        variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
         evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command,
                                                                                   jp.java.util.Arrays.asList(
@@ -669,7 +669,7 @@ class NetworkModel:
                 'unweighted_case_count': result.getUnweightedCaseCount(),
                 'bic': result.getBIC().floatValue()}, self._logger)
 
-    def batch_query(self, dataset: bayespy.data.DataSet, queries: List[QueryBase], append_to_df=True,
+    def batch_query(self, dataset: bayesianpy.data.DataSet, queries: List[QueryBase], append_to_df=True,
                     variable_references: List[str] = []):
         bq = BatchQuery(self._jnetwork, dataset, self._logger)
         return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references)

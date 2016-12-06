@@ -3,12 +3,12 @@
 REM checkout a particular tagged version.
 IF NOT EXIST ./scripts mkdir ./scripts
 
-IF EXIST "./scripts/bayespy" (
-pushd "./scripts/bayespy"
-CALL git fetch https://github.com/morganics/BayesPy.git
+IF EXIST "./scripts/bayesianpy" (
+pushd "./scripts/bayesianpy"
+CALL git fetch https://github.com/morganics/BayesianPy.git
 popd
 ) else (
-CALL git clone https://github.com/morganics/BayesPy.git "./scripts/bayespy"
+CALL git clone https://github.com/morganics/BayesianPy.git "./scripts/bayesianpy"
 )
 
 @echo on

@@ -1,11 +1,11 @@
 import pandas as pd
-from bayespy.network import Discrete
-import bayespy.network
+from bayesianpy.network import Discrete
+import bayesianpy.network
 import numpy as np
 from collections import Counter
-import bayespy.data
-import bayespy.jni
-from bayespy.jni import jp
+import bayesianpy.data
+import bayesianpy.jni
+from bayesianpy.jni import jp
 
 
 class _AutoInsight:
@@ -14,26 +14,26 @@ class _AutoInsight:
         self._network = network
         self._logger = logger
         self._target = target
-        self._target_state = bayespy.network.get_state(network, target.variable, target.state)
+        self._target_state = bayesianpy.network.get_state(network, target.variable, target.state)
         self._target = target
-        (self._inf_engine, _, _) = bayespy.model.InferenceEngine(network).create(retract=False)
+        (self._inf_engine, _, _) = bayesianpy.model.InferenceEngine(network).create(retract=False)
 
     def calculate(self, evidence=[], sort_by=['difference']):
 
         variables = jp.java.util.Arrays.asList(
             [v for v in self._network.getVariables() if v.getName() != self._target.variable])
 
-        ai = bayespy.jni.bayesServerAnalysis().AutoInsight
+        ai = bayesianpy.jni.bayesServerAnalysis().AutoInsight
 
         if len(evidence) > 0:
-            e = bayespy.model.Evidence(self._network, self._inf_engine)
+            e = bayesianpy.model.Evidence(self._network, self._inf_engine)
             evidence_obj = e.apply(evidence)
             auto_insight_output = ai.calculate(self._target_state, variables,
-                                           bayespy.model.InferenceEngine.get_inference_factory(),
-                                           evidence_obj)
+                                               bayesianpy.model.InferenceEngine.get_inference_factory(),
+                                               evidence_obj)
         else:
             auto_insight_output = ai.calculate(self._target_state, variables,
-                                               bayespy.model.InferenceEngine.get_inference_factory())
+                                               bayesianpy.model.InferenceEngine.get_inference_factory())
 
         results = []
         for variable in auto_insight_output.getVariableOutputs():
@@ -69,7 +69,7 @@ class AutoInsight:
 
         for i in range(self._comparison_model_count):
             network = self._network_template.create()
-            model = bayespy.model.NetworkModel(network, self._data_store, self._logger)
+            model = bayesianpy.model.NetworkModel(network, self._data_store, self._logger)
             model.train()
             self._model_cache.append(_AutoInsight(network, self._target, self._logger))
 
@@ -83,14 +83,14 @@ class AutoInsight:
         combinations = pd.DataFrame()
         for model in models:
             insight = model.calculate()
-            reader = bayespy.data.DataFrameReader(insight)
+            reader = bayesianpy.data.DataFrameReader(insight)
             while reader.read():
                 rows = [reader.to_dict()]
-                evidence = [bayespy.network.Discrete(reader.variable, reader.state)]
+                evidence = [bayesianpy.network.Discrete(reader.variable, reader.state)]
                 for i in range(combination_length-1):
                     sub_insight = model.calculate(evidence=evidence)
                     top_row = sub_insight.iloc[0]
-                    evidence.append(bayespy.network.Discrete(top_row.variable, top_row.state))
+                    evidence.append(bayesianpy.network.Discrete(top_row.variable, top_row.state))
                     d = top_row.to_dict()
                     d.update({'group': group})
                     rows.append(d)
@@ -115,7 +115,7 @@ class AutoInsight:
             for j in range(10):
                 step = model.calculate(evidence=evidence)
                 row = step.iloc[0]
-                evidence.append(bayespy.network.Discrete(row.variable, row.state))
+                evidence.append(bayesianpy.network.Discrete(row.variable, row.state))
                 d = row.to_dict()
                 d.update({'group': i})
                 rows.append(d)
@@ -234,7 +234,7 @@ class AutoInsight1:
         o_2 = pd.merge(output_1.discrete, output.discrete, on=['variable', 'state'])
         o_2['difference'] = o_2['value'] - o_2['base_probability']
 
-        o_2['variable_state'] = o_2.variable.str.cat(others=o_2.state, sep=bayespy.network.STATE_DELIMITER)
+        o_2['variable_state'] = o_2.variable.str.cat(others=o_2.state, sep=bayesianpy.network.STATE_DELIMITER)
         return (o_2, c_2)
 
     def _resolve_cluster_index(self, df, variable, state):
@@ -282,15 +282,15 @@ class AutoInsight1:
         cc = Counter()
         models = []
         for df, model in features:
-            dfr = bayespy.data.DataFrameReader(
+            dfr = bayesianpy.data.DataFrameReader(
                 df[(df.base_probability < 0.008) & (df.difference > 0.005) & (df.difference < 1)])
             while dfr.read():
                 if dfr['variable'] == target.variable or dfr['variable'] == 'Cluster':
                     continue
 
-                if bayespy.network.is_cluster_variable(dfr['variable']):
+                if bayesianpy.network.is_cluster_variable(dfr['variable']):
                     ix = self._resolve_cluster_index(df, dfr['variable'], dfr['state'])
-                    cc["{}{}{}".format(dfr['variable'], bayespy.network.STATE_DELIMITER, ix)] += dfr['difference']
+                    cc["{}{}{}".format(dfr['variable'], bayesianpy.network.STATE_DELIMITER, ix)] += dfr['difference']
 
                 else:
                     cc[dfr['variable_state']] += dfr['difference']
@@ -321,14 +321,14 @@ class AutoInsight1:
         cc = Counter()
         models = []
         for df, model in features:
-            dfr = bayespy.data.DataFrameReader(df)
+            dfr = bayesianpy.data.DataFrameReader(df)
             while dfr.read():
                 if dfr['variable'] == target.variable or dfr['variable'] == 'Cluster':
                     continue
 
-                if bayespy.network.is_cluster_variable(dfr['variable']):
+                if bayesianpy.network.is_cluster_variable(dfr['variable']):
                     ix = self._resolve_cluster_index(df, dfr['variable'], dfr['state'])
-                    cc["{}{}{}".format(dfr['variable'], bayespy.network.STATE_DELIMITER, ix)] += dfr['difference']
+                    cc["{}{}{}".format(dfr['variable'], bayesianpy.network.STATE_DELIMITER, ix)] += dfr['difference']
 
                 else:
                     cc[dfr['variable_state']] += dfr['difference']
@@ -351,8 +351,8 @@ class AutoInsight1:
         mc = []
         models = [m[0] for m in query]
         for (v, d) in most_common:
-            v_ = bayespy.network.Discrete.fromstring(v)
-            if bayespy.network.is_cluster_variable(v_.variable):
+            v_ = bayesianpy.network.Discrete.fromstring(v)
+            if bayesianpy.network.is_cluster_variable(v_.variable):
                 av = []
                 va = []
                 for df, model in query:
@@ -361,7 +361,7 @@ class AutoInsight1:
                     va.append(c['variance'])
 
                 #target_probability = self._get_mean_value_across_models(models, v_, 'target_probability')
-                mc.append((bayespy.network.Discrete(v_.variable, c['state']).tostring(),
+                mc.append((bayesianpy.network.Discrete(v_.variable, c['state']).tostring(),
                            {'mean': np.mean(av), 'variance': np.mean(va), 'sum_difference': d, 'target_probability': 0}))
             else:
                 base_probability = self._get_mean_value_across_models(models, v_, 'base_probability')
@@ -391,10 +391,10 @@ class AutoInsight1:
         network_builder.build_naive_network_with_latent_parents(discrete=self._discrete,
                                                                 continuous=self._continuous, latent_states=10)
 
-        if not bayespy.network.is_variable_discrete(bayespy.network.get_variable(network, target.variable)):
+        if not bayesianpy.network.is_variable_discrete(bayesianpy.network.get_variable(network, target.variable)):
             raise ValueError("Target variable '{}' is not discrete.".format(target.variable))
 
-        target_alt = list(bayespy.network.get_other_states_from_variable(network, target))
+        target_alt = list(bayesianpy.network.get_other_states_from_variable(network, target))
         self._logger.debug("Finished building network.")
 
 
@@ -423,13 +423,13 @@ class AutoInsight1:
             discrete_features['variance'] = 0.0
             discrete_features['target_probability'] = 0.0
 
-            dfr = bayespy.data.DataFrameReader(discrete_features)
+            dfr = bayesianpy.data.DataFrameReader(discrete_features)
             while dfr.read():
                 if dfr['variable'] == target.variable or dfr['variable'] == 'Cluster':
                     continue
 
                 (ds, cs) = self.query_model_with_evidence(model=model, new_evidence=[dfr['variable_state']])
-                if bayespy.network.is_cluster_variable(dfr['variable']):
+                if bayesianpy.network.is_cluster_variable(dfr['variable']):
                     discrete_features.set_value(dfr.get_index(), 'mean',
                                                 cs[cs.variable == dfr['continuous_variable_name']]['mean'])
                     discrete_features.set_value(dfr.get_index(), 'variance',
@@ -462,7 +462,7 @@ class AutoInsight1:
                 row = {'mean': np.nan, 'variance': np.nan, 'variable': '', 'probability': 0.0, 'state': '',
                        'max_p': 0.0,
                        'difference': 0.0}
-                d = bayespy.network.Discrete.fromstring(item)
+                d = bayesianpy.network.Discrete.fromstring(item)
                 c_name = d.variable.replace("Cluster_", "")
                 if c_name != d.variable:
                     for cv in result['continuous_variables']:
@@ -488,7 +488,7 @@ class AutoInsight1:
         network_builder.build_naive_network_with_latent_parents(discrete=self._discrete,
                                                                 continuous=self._continuous, latent_states=10)
 
-        target_alt = list(bayespy.network.get_other_states_from_variable(network, target))
+        target_alt = list(bayesianpy.network.get_other_states_from_variable(network, target))
         self._logger.debug("Finished building network.")
         t = [target.tostring()]
 
@@ -525,7 +525,7 @@ class AutoInsight1:
                 # get the target probability given evidence applied to the newly found variable
                 (dsf, csf) = self.evidence_query(model=model, new_evidence=base_evidence)
 
-                if recent_variable is not None and bayespy.network.is_cluster_variable(recent_variable.variable):
+                if recent_variable is not None and bayesianpy.network.is_cluster_variable(recent_variable.variable):
                     c_v_name = recent_variable.variable.replace("Cluster_", "")
                     continuous_variables.append({'mean': float(csf[c_v_name == csf.variable]['mean']),
                                                  'variance': float(csf[c_v_name == csf.variable]['variance']),
@@ -562,7 +562,7 @@ class AutoInsight1:
         network_builder.build_naive_network_with_latent_parents(discrete=self._discrete,
                                                                 continuous=self._continuous, latent_states=10)
 
-        target_alt = list(bayespy.network.get_other_states_from_variable(network, target))
+        target_alt = list(bayesianpy.network.get_other_states_from_variable(network, target))
         self._logger.debug("Finished building network.")
 
         results = []

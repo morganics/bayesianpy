@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/bayespy.iml" filepath="$PROJECT_DIR$/.idea/bayespy.iml" />
+      <module fileurl="file://$USER_HOME$/PycharmProjects/bayesianpy/.idea/bayesianpy.iml" filepath="$USER_HOME$/PycharmProjects/bayesianpy/.idea/bayesianpy.iml" />
     </modules>
   </component>
 </project>

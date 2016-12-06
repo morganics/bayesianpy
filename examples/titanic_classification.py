@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import re
-import bayespy
+import bayesianpy
 
 import logging
 import os
@@ -25,7 +25,7 @@ def get_cabin_floor_and_number(cabin):
     return "", np.nan
 
 def main():
-    db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
+    db_folder = bayesianpy.utils.get_path_to_parent_dir(__file__)
     titanic = pd.read_csv(os.path.join(db_folder, "data/titanic.csv"))
 
     titanic['Floor'], titanic['CabinNumber'] = zip(*titanic.Cabin.map(get_cabin_floor_and_number))
@@ -38,29 +38,29 @@ def main():
     logger.setLevel(logging.INFO)
 
     # attach/ startup the JVM
-    bayespy.jni.attach(logger)
+    bayesianpy.jni.attach(logger)
 
     # get a good guess as to whether the variable is discrete/ continuous
-    auto = bayespy.data.AutoType(titanic)
-    network_factory = bayespy.network.NetworkFactory(logger)
+    auto = bayesianpy.data.AutoType(titanic)
+    network_factory = bayesianpy.network.NetworkFactory(logger)
 
     discrete = titanic[list(auto.get_discrete_variables())]
     continuous = titanic[list(auto.get_continuous_variables())]
 
     # write data to the temporary sqllite db
-    with bayespy.data.DataSet(titanic, db_folder, logger) as dataset:
+    with bayesianpy.data.DataSet(titanic, db_folder, logger) as dataset:
 
         # learn the model structure using built-in algorithm
-        tpl = bayespy.template.NetworkWithoutEdges(discrete=discrete,
-                                                   continuous=continuous)
+        tpl = bayesianpy.template.NetworkWithoutEdges(discrete=discrete,
+                                                      continuous=continuous)
 
-        structure_tpl = bayespy.template.AutoStructure(tpl, dataset, logger)
+        structure_tpl = bayesianpy.template.AutoStructure(tpl, dataset, logger)
 
         # this gives us a Java network object
         learned_network = structure_tpl.create(network_factory)
 
         # Or, use a standard template, which generally gives good performance
-        mixture_naive_bayes_tpl = bayespy.template.MixtureNaiveBayes(logger, discrete=discrete, continuous=continuous)
+        mixture_naive_bayes_tpl = bayesianpy.template.MixtureNaiveBayes(logger, discrete=discrete, continuous=continuous)
 
         k_folds = 3
 
@@ -68,7 +68,7 @@ def main():
         score = 0
         # use cross validation to try and predict whether the individual survived or not
         for k, (train_indexes, test_indexes) in enumerate(kf):
-            model = bayespy.model.NetworkModel(
+            model = bayesianpy.model.NetworkModel(
                             mixture_naive_bayes_tpl.create(network_factory),
                             logger)
 
@@ -77,7 +77,7 @@ def main():
 
             # note that we've not 'dropped' the target data anywhere, this will be retracted when it's queried,
             # by specifying query_options.setQueryEvidenceMode(bayesServerInference().QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
-            results = model.batch_query(dataset.subset(test_indexes), [bayespy.model.QueryMostLikelyState("Survived", output_dtype=titanic['Survived'].dtype)])
+            results = model.batch_query(dataset.subset(test_indexes), [bayesianpy.model.QueryMostLikelyState("Survived", output_dtype=titanic['Survived'].dtype)])
 
             # Each query just appends a column/ columns on to the original dataframe, so results is the same as titanic.iloc[test_indexes],
             # with (in this case) one additional column called 'Survived_maxlikelihood', joined to the original.

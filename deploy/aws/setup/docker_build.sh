@@ -13,12 +13,12 @@ if [ ! -d "./scripts" ]; then
   mkdir "./scripts"
 fi
 
-if [ -d "./scripts/bayespy" ]; then
-    pushd "./scripts/bayespy"
-    git fetch https://github.com/morganics/BayesPy.git
+if [ -d "./scripts/bayesianpy" ]; then
+    pushd "./scripts/bayesianpy"
+    git fetch https://github.com/morganics/BayesianPy.git
     popd
 else
-    git clone https://github.com/morganics/BayesPy.git "./scripts/bayespy"
+    git clone https://github.com/morganics/BayesianPy.git "./scripts/bayesianpy"
 fi
 
 docker build -t docker_image .

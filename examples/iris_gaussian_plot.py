@@ -1,6 +1,6 @@
 import pandas as pd
-import bayespy
-from bayespy.network import Builder as builder
+import bayesianpy
+from bayesianpy.network import Builder as builder
 
 import logging
 import os
@@ -16,12 +16,12 @@ def main():
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.INFO)
 
-    bayespy.jni.attach(logger)
+    bayesianpy.jni.attach(logger)
 
-    db_folder = bayespy.utils.get_path_to_parent_dir(__file__)
+    db_folder = bayesianpy.utils.get_path_to_parent_dir(__file__)
     iris = pd.read_csv(os.path.join(db_folder, "data/iris.csv"), index_col=False)
 
-    network = bayespy.network.create_network()
+    network = bayesianpy.network.create_network()
     cluster = builder.create_cluster_variable(network, 4)
     node = builder.create_multivariate_continuous_node(network, iris.drop('iris_class',axis=1).columns.tolist(), "joint")
     builder.create_link(network, cluster, node)
@@ -31,18 +31,18 @@ def main():
 
     head_variables = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
 
-    with bayespy.data.DataSet(iris, db_folder, logger) as dataset:
-        model = bayespy.model.NetworkModel(network, logger)
+    with bayesianpy.data.DataSet(iris, db_folder, logger) as dataset:
+        model = bayesianpy.model.NetworkModel(network, logger)
         model.train(dataset)
 
-        queries = [bayespy.model.QueryConditionalJointProbability(
+        queries = [bayesianpy.model.QueryConditionalJointProbability(
                 head_variables=[v],
                     tail_variables=['iris_class']) for v in head_variables]
 
-        (engine, _, _) = bayespy.model.InferenceEngine(network).create()
-        query = bayespy.model.SingleQuery(network, engine, logger)
+        (engine, _, _) = bayesianpy.model.InferenceEngine(network).create()
+        query = bayesianpy.model.SingleQuery(network, engine, logger)
         results = query.query(queries, aslist=True)
-        jd = bayespy.visual.JointDistribution()
+        jd = bayesianpy.visual.JointDistribution()
         fig = plt.figure(figsize=(10,10))
 
         for i, r in enumerate(list(results)):

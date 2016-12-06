@@ -1,7 +1,7 @@
 import pandas as pd
 import uuid
-from bayespy.jni import *
-from bayespy.data import DataFrame
+from bayesianpy.jni import *
+from bayesianpy.data import DataFrame
 import os
 
 
@@ -384,12 +384,12 @@ def remove_continuous_nodes(network):
 
 def get_continuous_variables(network):
     for variable in network.getVariables():
-        if bayespy.network.is_variable_continuous(variable):
+        if bayesianpy.network.is_variable_continuous(variable):
             yield variable
 
 def get_discrete_variables(network):
     for variable in network.getVariables():
-        if bayespy.network.is_variable_discrete(variable):
+        if bayesianpy.network.is_variable_discrete(variable):
             yield variable
 
 def remove_node(network, node):
@@ -428,7 +428,7 @@ def create_variable_references(network, data, variable_references=[]):
         variables = network.getVariables()
     else:
         for v in variable_references:
-            variables.append(bayespy.network.get_variable(network, v))
+            variables.append(bayesianpy.network.get_variable(network, v))
 
     latent_variable_name = "Cluster"
     for v in variables:
@@ -443,7 +443,7 @@ def create_variable_references(network, data, variable_references=[]):
         valueType = bayesServer().data.ColumnValueType.VALUE
 
         if v.getStateValueType() != bayesServer().StateValueType.DOUBLE_INTERVAL \
-                and bayespy.network.is_variable_discrete(v):
+                and bayesianpy.network.is_variable_discrete(v):
 
             if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype):
                 valueType = bayesServer().data.ColumnValueType.NAME

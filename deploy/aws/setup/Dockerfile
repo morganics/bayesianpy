@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y \
 	libpng-dev \
     libfreetype6-dev
 
-COPY ./scripts/bayespy /scripts/bayespy
+COPY ./scripts/bayesianpy /scripts/bayesianpy
 
-WORKDIR /scripts/bayespy
+WORKDIR /scripts/bayesianpy
 RUN pip install -e .
 

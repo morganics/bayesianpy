@@ -1,8 +1,8 @@
 import networkx as nx
 import numpy as np
-from bayespy.jni import bayesServer
+from bayesianpy.jni import bayesServer
 
-import bayespy.data
+import bayesianpy.data
 import pandas as pd
 
 import math
@@ -109,7 +109,7 @@ class JointDistribution:
         return ellip
 
     def plot_distribution_with_variance(self, ax, df: pd.DataFrame, head_variables: List[str],
-                          results: Dict[str, bayespy.model.Distribution]):
+                                        results: Dict[str, bayesianpy.model.Distribution]):
         import seaborn as sns
         for i, hv in enumerate(head_variables):
             x = np.arange(df[hv].min() - df[hv].std(), df[hv].max() + df[hv].std(), df[hv].max() - df[hv].min() / 1000)
@@ -120,14 +120,14 @@ class JointDistribution:
             for k, v in results.items():
                 s = df
                 for tv, st in v.get_tail():
-                    s = s[s[tv] == bayespy.data.DataFrame.cast2(s[tv].dtype, st)]
+                    s = s[s[tv] == bayesianpy.data.DataFrame.cast2(s[tv].dtype, st)]
 
                 sns.distplot(s[hv], hist=False, label=v.pretty_print_tail(), ax=ax)
 
             ax.set_ylim([0, np.max(pdfs)])
 
     def plot_distribution_with_covariance(self, ax, df: pd.DataFrame, head_variables: tuple,
-                                          results: Dict[str, bayespy.model.Distribution]):
+                                          results: Dict[str, bayesianpy.model.Distribution]):
 
         hv = head_variables
 
@@ -145,7 +145,7 @@ class JointDistribution:
 
     def plot_with_variance(self, df: pd.DataFrame,
                            head_variables: List[str],
-                           results: List[Dict[str, bayespy.model.Distribution]],
+                           results: List[Dict[str, bayesianpy.model.Distribution]],
                            plots_per_page=6):
 
         import matplotlib.pyplot as plt
@@ -170,7 +170,7 @@ class JointDistribution:
 
     def plot_with_covariance(self, df: pd.DataFrame,
                              head_variables: List[str],
-                             results: Dict[str, bayespy.model.Distribution],
+                             results: Dict[str, bayesianpy.model.Distribution],
                              plots_per_page=6):
 
         import matplotlib.pyplot as plt
