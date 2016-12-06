@@ -78,23 +78,12 @@ class Query:
         self._network = network
         self._logger = logger
 
-    def execute(self, queries: List[QueryBase], evidence=None, clear_evidence=True):
-        return self.query(queries, evidence=evidence, clear_evidence=clear_evidence, aslist=True)
-
-    def query_as_df(self, queries: List[QueryBase], evidence=None, clear_evidence=True) -> pd.DataFrame:
-        r = self.query(queries, evidence = evidence, clear_evidence = clear_evidence)
-        if len(queries) == 1:
-            return pd.DataFrame([r])
-        else:
-            return pd.DataFrame(r)
-
-    @deprecated("Use 'execute' instead.")
-    def query(self, queries: List[QueryBase], evidence=None, clear_evidence=True, aslist=False):
+    def execute(self, queries: List[QueryBase], evidence=None, clear_evidence=True, aslist=True):
         """
-        Query a number of variables (if none, then query all variables in the network)
-        :param variables: a list of variables, or none
-        :return: a QueryOutput object with separate continuous/ discrete dataframes
-        """
+               Query a number of variables (if none, then query all variables in the network)
+               :param variables: a list of variables, or none
+               :return: a QueryOutput object with separate continuous/ discrete dataframes
+               """
         for query in queries:
             query.setup(self._network, self._inference_engine, self._query_options)
 
@@ -117,6 +106,23 @@ class Query:
             return results[0]
 
         return results
+
+
+    def query_as_df(self, queries: List[QueryBase], evidence=None, clear_evidence=True) -> pd.DataFrame:
+        r = self.query(queries, evidence = evidence, clear_evidence = clear_evidence)
+        if len(queries) == 1:
+            return pd.DataFrame([r])
+        else:
+            return pd.DataFrame(r)
+
+    @deprecated("Use 'execute' instead")
+    def query(self, queries: List[QueryBase], evidence=None, clear_evidence=True, aslist=False):
+        """
+        Query a number of variables (if none, then query all variables in the network)
+        :param variables: a list of variables, or none
+        :return: a QueryOutput object with separate continuous/ discrete dataframes
+        """
+        return self.execute(queries, evidence=evidence, clear_evidence=clear_evidence, aslist=aslist)
 
 
 @deprecated("Use 'Query' instead.")

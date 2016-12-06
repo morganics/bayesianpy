@@ -112,8 +112,8 @@ class JointDistribution:
                                         results: Dict[str, bayesianpy.model.Distribution]):
         import seaborn as sns
         for i, hv in enumerate(head_variables):
-            x = np.arange(df[hv].min() - df[hv].std(), df[hv].max() + df[hv].std(), df[hv].max() - df[hv].min() / 1000)
-            pdfs = [ss.norm.pdf(x, results[k].get_mean(), results[k].get_std()) for k, v in results.items()]
+            x = np.arange(df[hv].min() - df[hv].std(), df[hv].max() + df[hv].std(), ((df[hv].max() + df[hv].std()) - (df[hv].min()-df[hv].std())) / 100)
+            pdfs = [ss.norm.pdf(x, v.get_mean(), v.get_std()) for k, v in results.items()]
             density = np.sum(np.array(pdfs), axis=0)
             ax.plot(x, density, label='Joint PDF', linestyle='dashed')
             ax.set_ylabel("pdf")
@@ -123,8 +123,6 @@ class JointDistribution:
                     s = s[s[tv] == bayesianpy.data.DataFrame.cast2(s[tv].dtype, st)]
 
                 sns.distplot(s[hv], hist=False, label=v.pretty_print_tail(), ax=ax)
-
-            ax.set_ylim([0, np.max(pdfs)])
 
     def plot_distribution_with_covariance(self, ax, df: pd.DataFrame, head_variables: tuple,
                                           results: Dict[str, bayesianpy.model.Distribution]):

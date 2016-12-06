@@ -104,8 +104,8 @@ def main():
                 tail_variables=['iris_class', 'Cluster'])
 
         (engine, _, _) = bayesianpy.model.InferenceEngine(network).create()
-        query = bayesianpy.model.SingleQuery(network, engine, logger)
-        results_class = query.query([query_type_class])
+        query = bayesianpy.model.Query(network, engine, logger)
+        results_class = query.execute([query_type_class])
 
         plot(head_variables, results_class)
 
@@ -113,7 +113,7 @@ def main():
             head_variables=head_variables,
             tail_variables=['Cluster'])
 
-        results_cluster = query.query([query_type_cluster])
+        results_cluster = query.execute([query_type_cluster])
 
         plot(head_variables, results_cluster)
 
