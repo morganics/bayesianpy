@@ -1,4 +1,4 @@
-# BayesPy
+# BayesianPy
 
 A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1. This wrapper is not released/ supported/ endorsed by Bayes Server.
 
@@ -18,10 +18,10 @@ Python is a simpler language to put together something quickly, the Bayes Server
 
 ## Jupyter examples
 
-- [Titanic Classification example] (https://github.com/morganics/BayesPy/blob/master/examples/notebook/titanic_classification.ipynb) provides a brief walkthrough of how to construct a network and run a batch query while using cross validation
-- [Iris Anomaly detection example] (https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_anomaly_detection.ipynb) provides a brief walkthrough  training a manually crafted network, as well as a batch query to obtain the Log Likelihood information theoretic score from the trained model to assist in identifying 'abnormal' data.
-- [Iris cluster visualisation with covariance] (https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_gaussian_mixture_model.ipynb) provides a brief walkthrough  training a naive Bayes network followed by a fully connected Gaussian mixture model, and how the clustering/ classification is affected as a result.
-- [Iris joint probability PDF visualisation] (https://github.com/morganics/BayesPy/blob/master/examples/notebook/iris_univariate_joint_pdf_plot.ipynb) Creates a fully connected Gaussian mixture model, where each variable is independently queried given the iris_class. Provides code for plotting a 1D joint distribution.
+- [Titanic Classification example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/titanic_classification.ipynb) provides a brief walkthrough of how to construct a network and run a batch query while using cross validation
+- [Iris Anomaly detection example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_anomaly_detection.ipynb) provides a brief walkthrough  training a manually crafted network, as well as a batch query to obtain the Log Likelihood information theoretic score from the trained model to assist in identifying 'abnormal' data.
+- [Iris cluster visualisation with covariance] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_gaussian_mixture_model.ipynb) provides a brief walkthrough  training a naive Bayes network followed by a fully connected Gaussian mixture model, and how the clustering/ classification is affected as a result.
+- [Iris joint probability PDF visualisation] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_univariate_joint_pdf_plot.ipynb) Creates a fully connected Gaussian mixture model, where each variable is independently queried given the iris_class. Provides code for plotting a 1D joint distribution.
 
 ## Example: training a model from a template
 
@@ -31,19 +31,19 @@ logger = logging.getLogger()
 
 # utility function to decide on whether variables are discrete/ continuous
 # df is a pandas dataframe.
-auto = bayespy.data.AutoType(df)
+auto = bayesianpy.data.AutoType(df)
 
 # creates a template to create a single discrete cluster (latent) node with edges to independent 
 # child nodes
-tpl = bayespy.template.MixtureNaiveBayes(logger,
+tpl = bayesianpy.template.MixtureNaiveBayes(logger,
                                                  discrete=df[list(auto.get_discrete_variables())],
                                                  continuous=df[list(auto.get_continuous_variables())],
                                                  latent_states=8)
 
-network_factory = bayespy.network.NetworkFactory(logger)
-with bayespy.data.DataSet(df, db_folder, logger) as dataset:
-    model = bayespy.model.NetworkModel(tpl.create(network_factory), dataset, logger)
-    model.train()
+network_factory = bayesianpy.network.NetworkFactory(logger)
+with bayesianpy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayesianpy.model.NetworkModel(tpl.create(network_factory), logger)
+    model.train(dataset) # or you can use a subset of the data, e.g. dataset.subset(list_of_indices)
     model.save("model.bayes")
 ```
 
@@ -51,13 +51,13 @@ with bayespy.data.DataSet(df, db_folder, logger) as dataset:
 ``` python
 
 # specify the filename of the trained model
-network_factory = bayespy.network.NetworkFactory(logger, network_file_path='model.bayes')
-with bayespy.data.DataSet(df, db_folder, logger) as dataset:
-    model = bayespy.model.NetworkModel(network_factory.create(), dataset, logger)    
+network_factory = bayesianpy.network.NetworkFactory(logger, network_file_path='model.bayes')
+with bayesianpy.data.DataSet(df, db_folder, logger) as dataset:
+    model = bayesianpy.model.NetworkModel(network_factory.create(), dataset, logger)    
     # Get the loglikelihood of the model given the evidence specified in df (here, using the same data as was trained upon)
     # Can also specify to calculate conflict, if required.
     # 'results' is a pandas dataframe, where each variable in df will have an additional column with a suffix of _loglikelihood.
-    results = model.batch_query(bayespy.model.QueryModelStatistics())
+    results = model.batch_query([bayesianpy.model.QueryModelStatistics()])
         
 ```    
 ## More examples
