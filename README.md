@@ -10,11 +10,16 @@ Supported functionality (currently only supports contemporal networks, although 
  - AutoInsight (using difference queries to understand variables' significance to the model, in insight.py)
  - Various utility functions for reading dataframes, casting and generally mapping between dataframes -> SQLlite -> Bayes Server.
  
-Note: I believe there is now an in-memory implementation for mapping between dataframes and Bayes Server, however the SDK currently writes data to an SQLlite database which is then read by the Java API.
+Note: The SDK currently writes data to an SQLlite database which is then read by the Java API.
 
 ## Motivation
 
-Python is a simpler language to put together something quickly, the Bayes Server API is very powerful, and consequently can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is fairly stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
+Python is a simpler language to put something together quickly and the Bayes Server API is very powerful; and consequently it can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
+
+## Are Bayesian networks Bayesian? (from BayesServer.com)
+
+Yes and no. They do make use of Bayes Theorem during inference, and typically use priors during batch parameter learning. However they do not typically use a full Bayesian treatment in the Bayesian statistical sense (i.e. hyper parameters and learning case by case).
+The matter is further confused, as Bayesian networks tyically DO use a full Bayesian approach for Online learning.
 
 ## Jupyter examples
 
@@ -22,6 +27,7 @@ Python is a simpler language to put together something quickly, the Bayes Server
 - [Iris Anomaly detection example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_anomaly_detection.ipynb) provides a brief walkthrough  training a manually crafted network, as well as a batch query to obtain the Log Likelihood information theoretic score from the trained model to assist in identifying 'abnormal' data.
 - [Iris cluster visualisation with covariance] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_gaussian_mixture_model.ipynb) provides a brief walkthrough  training a naive Bayes network followed by a fully connected Gaussian mixture model, and how the clustering/ classification is affected as a result.
 - [Iris joint probability PDF visualisation] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_univariate_joint_pdf_plot.ipynb) Creates a fully connected Gaussian mixture model, where each variable is independently queried given the iris_class. Provides code for plotting a 1D joint distribution.
+- [Diabetes Linear regression example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/diabetes_linear_regression.ipynb) Creates a simple naive Bayes network to give a linear regression model for the diabetes dataset from scikit-learn, with mean and variance.
 
 ## Example: training a model from a template
 

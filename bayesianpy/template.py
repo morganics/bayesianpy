@@ -12,6 +12,43 @@ class Template:
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         pass
 
+class NaiveBayes(Template):
+    def __init__(self, parent_node: str, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), discrete_states={}):
+        super().__init__(discrete=discrete, continuous=continuous)
+        self._discrete_states = discrete_states
+        self._logger = logger
+        self._parent_node = parent_node
+
+    def create(self, network_factory):
+        network = network_factory.create()
+
+        if not self._continuous.empty:
+            for c_name in self._continuous.columns:
+                c = builder.create_continuous_variable(network, c_name)
+
+        if not self._discrete.empty:
+            for d_name in self._discrete.columns:
+                if d_name in self._discrete_states:
+                    states = self._discrete_states[d_name]
+                else:
+                    states = self._discrete[d_name].dropna().unique()
+
+                try:
+                    c = builder.create_discrete_variable(network, self._discrete, d_name, states)
+                except BaseException as e:
+                    self._logger.warn(e)
+
+        parent_node = builder.try_get_node(network, self._parent_node)
+        if parent_node is None:
+            raise ValueError("Parent node: {} not recognised".format(self._parent_node))
+
+        for node in network.getNodes():
+            if node == parent_node:
+                continue
+            builder.create_link(network, parent_node, node)
+
+        return network
+
 class MixtureNaiveBayes(Template):
 
     def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, discrete_states={}, latent_variable_name='Cluster'):
