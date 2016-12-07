@@ -7,6 +7,7 @@ from bayesianpy import template
 from bayesianpy import visual
 from bayesianpy.jni import bayesServer as _bs
 from bayesianpy import utils
+from bayesianpy import analysis
 
 def license(key):
     l = _bs().License.validate(key)

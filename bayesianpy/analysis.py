@@ -51,7 +51,7 @@ class LogLikelihoodAnalysis:
                 for i, tpl in enumerate(templates):
 
                     n = type(tpl).__name__ if use_model_names else ""
-                    name = n if names is None else n + names[i]
+                    name = n if names is None else n + str(names[i])
 
                     model = bayesianpy.model.NetworkModel(tpl.create(network_factory), self._logger)
                     try:
