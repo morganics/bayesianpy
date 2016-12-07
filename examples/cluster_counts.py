@@ -14,9 +14,7 @@ import matplotlib.pyplot as plt
 def main():
 
     logger = logging.getLogger()
-    logger.addHandler(logging.StreamHandler())
-    logger.setLevel(logging.INFO)
-
+    
     bayesianpy.jni.attach(logger)
 
     db_folder = bayesianpy.utils.get_path_to_parent_dir(__file__)
