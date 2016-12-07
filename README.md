@@ -29,6 +29,7 @@ The matter is further confused, as Bayesian networks tyically DO use a full Baye
 - [Iris joint probability PDF visualisation] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_univariate_joint_pdf_plot.ipynb) Creates a fully connected Gaussian mixture model, where each variable is independently queried given the iris_class. Provides code for plotting a 1D joint distribution.
 - [Diabetes Linear regression example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/diabetes_linear_regression.ipynb) Creates a simple naive Bayes network to give a linear regression model for the diabetes dataset from scikit-learn, with mean and variance.
 - [Diabetes Non-Linear regression example] (https://github.com/morganics/bayesianpy/blob/master/examples/notebook/diabetes_non_linear_regression.ipynb) Creates a mixture of Gaussians network to give a non-linear regression model for the diabetes dataset from scikit-learn, with mean and variance.
+- [Iris Cluster Count](https://github.com/morganics/bayesianpy/blob/master/examples/notebook/iris_cluster_count.ipynb) Simple demo to show selecting the optimal number of clusters for a latent variable using the Iris dataset.
 
 ## Example: training a model from a template
 
@@ -64,7 +65,7 @@ with bayesianpy.data.DataSet(df, db_folder, logger) as dataset:
     # Get the loglikelihood of the model given the evidence specified in df (here, using the same data as was trained upon)
     # Can also specify to calculate conflict, if required.
     # 'results' is a pandas dataframe, where each variable in df will have an additional column with a suffix of _loglikelihood.
-    results = model.batch_query([bayesianpy.model.QueryModelStatistics()])
+    results = model.batch_query(dataset, [bayesianpy.model.QueryModelStatistics()])
         
 ```    
 ## More examples
