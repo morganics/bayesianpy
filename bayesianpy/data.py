@@ -8,6 +8,10 @@ import uuid
 import shutil
 from bayesianpy.jni import bayesServer, bayesServerAnalysis, bayesServerDiscovery, jp
 import os
+from bayesianpy.decorators import listify
+import dask.dataframe as dd
+from typing import Iterable
+import bayesianpy.dask as dk
 
 class DataFrameReader:
     def __init__(self, df):
@@ -61,6 +65,7 @@ class AutoType:
         self._continuous = continuous
         self._discrete = discrete
 
+    @listify
     def get_continuous_variables(self):
         cols = self._df.columns.tolist()
         for col in cols:
@@ -73,6 +78,7 @@ class AutoType:
             elif len(self._df[col].unique()) > self._continuous_to_discrete_limit:
                 yield col
 
+    @listify
     def get_discrete_variables(self):
         continuous = set(self.get_continuous_variables())
         for col in self._df.columns.tolist():
@@ -87,7 +93,12 @@ class AutoType:
             elif col not in continuous:
                 yield col
 
+
 class DataFrame:
+
+    def __init__(self, df):
+        self._df = df
+
     @staticmethod
     def is_timestamp(dtype):
         return str(dtype) in ['timestamp64', 'timedelta64']
@@ -149,6 +160,29 @@ class DataFrame:
         return df
 
     @staticmethod
+    def coerce_to_boolean(df: pd.DataFrame, ignore=[]):
+        for col in df.columns:
+            if col in ignore:
+                continue
+
+            if df[col].min() == df[col].max():
+                continue
+
+            if len(df[col].dropna().unique()) != 2:
+                continue
+
+            values = df[col].dropna().unique()
+            series = df[col].astype(bool)
+
+            if len(df[df[col] == values[0]]) != len(series[series == True]) and \
+                            len(df[df[col] == values[1]]) != len(series[series == True]):
+                continue
+
+            df[col] = series
+
+        return df
+
+    @staticmethod
     def cast2(dtype, value):
         if DataFrame.is_int(dtype):
             return int(value)
@@ -175,6 +209,37 @@ class DataFrame:
         for col in columns:
             if col in df.columns:
                 df.loc[df[col] == 0, col] = df[col].apply(lambda x: np.random.normal(0, 3))
+
+
+class DaskDataFrame:
+
+    def __init__(self, df: dd.DataFrame):
+        self._df = df
+        self.empty = all(p.empty for p in self._get_df_partitions())
+
+    def __len__(self):
+        return len(self._df)
+
+    def __getattribute__(self, item):
+        try:
+            return super().__getattribute__(item)
+        except AttributeError:
+            return self._df.__getattribute__(item)
+
+    def __getitem__(self, key):
+        # the df index of the row is at index 0
+        return self._df.__getitem__(key)
+
+    def _get_df_partitions(self) -> Iterable[pd.DataFrame]:
+        for partitition in range(0, self._df.npartitions):
+            yield self._df.get_partition(partitition).compute()
+
+    def to_sql(self, table, engine, index_label='ix', index=True):
+        for partition in range(0, self._df.npartitions):
+            df = self._df.get_partition(partition)
+            df.compute().to_sql(table, engine, if_exists='append', index_label=index_label, index=True)
+
+
 
 class Filter:
     @staticmethod
@@ -211,7 +276,8 @@ def create_histogram(series):
     return bayesServerAnalysis().HistogramDensity.learn(jp.java.util.Arrays.asList(values), hdo)
 
 class DataSet:
-    def __init__(self, df: pd.DataFrame, db_folder: str, logger: logging.Logger, identifier:str=None):
+    def __init__(self, df: pd.DataFrame, db_folder: str, logger: logging.Logger,
+                 identifier: str=None, weight_column: str=None):
         if identifier is None:
             self.uuid = str(uuid.uuid4()).replace("-","")
         else:
@@ -224,9 +290,14 @@ class DataSet:
         self.table = "table_" + self.uuid
         self._logger = logger
         self.data = df
+        self._weight_column = weight_column
 
     def subset(self, indices:List[int]):
-        return DataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
+        return DataSet(self.data.loc[indices], self._db_dir, self._logger, identifier=self.uuid)
+
+    def get_reader_options(self):
+        return bayesServer().data.ReaderOptions("ix") if self._weight_column is None \
+            else bayesServer().data.ReaderOptions("ix", self._weight_column)
 
     def get_dataframe(self):
         return self.data
@@ -240,7 +311,7 @@ class DataSet:
 
     def write(self):
         self._logger.info("Writing {} rows to storage".format(len(self.data)))
-        self.data.to_sql(self.table, self._engine, if_exists='replace', index_label='ix', index=True)
+        dk.to_sql(self.data, self.table, self._engine)
         self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
 
     def create_data_reader_command(self, indexes=[]):
@@ -251,7 +322,7 @@ class DataSet:
         """
 
         if len(indexes) == 0:
-            indexes = self.get_dataframe().index.tolist()
+            indexes = dk.compute(self.get_dataframe().index).tolist()
 
         data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
             self.get_connection(),
