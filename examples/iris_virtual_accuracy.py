@@ -30,7 +30,7 @@ def main():
     class_variable = builder.create_discrete_variable(network, iris, 'iris_class', iris['iris_class'].unique())
     builder.create_link(network, cluster, class_variable)
 
-    train, test = train_test_split(iris, test_size=0.5)
+    train, test = train_test_split(iris, test_size=0.7)
 
     # train the model and query the most likely states and probability of each latent state.
     with bayesianpy.data.DataSet(iris, db_folder, logger) as dataset:

@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn import datasets
 import bayesianpy
-from bayesianpy.network import Builder as builder
+
 import pandas as pd
 import logging
 from sklearn.model_selection import train_test_split

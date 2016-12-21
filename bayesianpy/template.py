@@ -2,6 +2,7 @@ from bayesianpy.network import Builder as builder
 import pandas as pd
 import bayesianpy.network
 from bayesianpy.jni import *
+import bayesianpy.dask as dk
 
 
 class Template:
@@ -22,16 +23,16 @@ class NaiveBayes(Template):
     def create(self, network_factory):
         network = network_factory.create()
 
-        if not self._continuous.empty:
+        if not dk.empty(self._continuous):
             for c_name in self._continuous.columns:
                 c = builder.create_continuous_variable(network, c_name)
 
-        if not self._discrete.empty:
+        if dk.empty(self._discrete):
             for d_name in self._discrete.columns:
                 if d_name in self._discrete_states:
                     states = self._discrete_states[d_name]
                 else:
-                    states = self._discrete[d_name].dropna().unique()
+                    states = dk.compute(self._discrete[d_name].dropna().unique()).tolist()
 
                 try:
                     c = builder.create_discrete_variable(network, self._discrete, d_name, states)
@@ -64,7 +65,7 @@ class MixtureNaiveBayes(Template):
         if cluster is None:
             cluster = builder.create_cluster_variable(network, self._latent_states, variable_name=self._latent_variable_name)
 
-        if not self._continuous.empty:
+        if not dk.empty(self._continuous):
             for c_name in self._continuous.columns:
                 c = builder.create_continuous_variable(network, c_name)
                 try:
@@ -72,12 +73,12 @@ class MixtureNaiveBayes(Template):
                 except ValueError as e:
                     self._logger.warn(e)
 
-        if not self._discrete.empty:
+        if not dk.empty(self._discrete):
             for d_name in self._discrete.columns:
                 if d_name in self._discrete_states:
                     states = self._discrete_states[d_name]
                 else:
-                    states = self._discrete[d_name].dropna().unique()
+                    states = dk.compute(self._discrete[d_name].dropna().unique()).tolist()
 
                 try:
                     c = builder.create_discrete_variable(network, self._discrete, d_name, states)
@@ -109,7 +110,6 @@ class NetworkWithoutEdges(Template):
                 if d_name in self._discrete_states:
                     states = self._discrete_states[d_name]
                 else:
-                    print(d_name)
                     states = self._discrete[d_name].dropna().unique()
 
                 builder.create_discrete_variable(network, self._discrete, d_name, states)
