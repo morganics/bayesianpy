@@ -20,6 +20,8 @@ import pathos.multiprocessing as mp
 import itertools
 import math
 
+import bayesianpy.dask as dk
+
 from typing import List
 
 
@@ -475,7 +477,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
     data_reader = bayesServer().data.DatabaseDataReaderCommand(
         connection_string,
         "select * from {} where ix in ({})".format(table_name,
-                                                   ",".join(str(i) for i in df.index.tolist()))).executeReader()
+                                                   ",".join(str(i) for i in dk.compute(df.index).tolist()))).executeReader()
 
     network = bayesianpy.network.create_network_from_string(network)
     reader_options = bayesServer().data.ReaderOptions("ix")
@@ -565,7 +567,7 @@ class BatchQuery:
         self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
 
         if processes == 1:
-            pdf = pd.DataFrame(_batch_query(self._datastore.data, conn, nt, table,
+            pdf = pd.DataFrame(_batch_query(self._datastore.get_dataframe(), conn, nt, table,
                                             variable_references, queries,
                                             logger, 0))
         else:
@@ -577,13 +579,13 @@ class BatchQuery:
                 for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
                                                                    variable_references, queries,
                                                                    logger, 0),
-                                           np.array_split(self._datastore.data, processes)):
+                                           np.array_split(self._datastore.get_dataframe(), processes)):
                     pdf = pdf.append(pd.DataFrame(result_set))
 
         df = pdf.set_index('caseid')
 
         if append_to_df:
-            return self._datastore.data.join(df)
+            return self._datastore.get_dataframe().join(df)
         else:
             return df
 
@@ -655,7 +657,7 @@ class NetworkModel:
 
         data_reader_command = dataset.create_data_reader_command()
 
-        reader_options = bayesServer().data.ReaderOptions()
+        reader_options = dataset.get_reader_options()
 
         variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
