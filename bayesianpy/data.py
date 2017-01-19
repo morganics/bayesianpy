@@ -12,6 +12,7 @@ from bayesianpy.decorators import listify
 import dask.dataframe as dd
 from typing import Iterable
 import bayesianpy.dask as dk
+from collections import defaultdict
 
 class DataFrameReader:
     def __init__(self, df):
@@ -20,6 +21,7 @@ class DataFrameReader:
         self._columns = df.columns.tolist()
         self.reset()
         self.row_index = 0
+        self._writer = DataFrameWriter()
 
     def __getattr__(self, key):
         return self.__getitem__(key)
@@ -44,6 +46,12 @@ class DataFrameReader:
     def row(self):
         return {c : self.__getitem__(c) for c in self._columns}
 
+    def writer(self):
+        if self._row is not None:
+            return self._writer.with_index(self.get_index())
+        else:
+            return self._writer
+
     def __getitem__(self, key):
         # the df index of the row is at index 0
         try:
@@ -57,6 +65,37 @@ class DataFrameReader:
             return self
         else:
             raise StopIteration
+
+class DataFrameWriter:
+
+    def __init__(self):
+        self._columns = defaultdict(list)
+        self._row_indices = set()
+
+    def with_index(self, index):
+        if index not in self._row_indices:
+            self._row_indices.add(index)
+
+        self._current_row_index = index
+        return self
+
+    def set_value(self, column, value):
+        self._columns[column].append(value)
+
+    def as_dataframe(self):
+        self._columns['ix'] = list(self._row_indices)
+        df = pd.DataFrame(self._columns)
+        return df.set_index('ix')
+
+    def flush(self, df: pd.DataFrame):
+        df1 = self.as_dataframe()
+        return df.join(df1)
+
+
+
+
+
+
 
 class AutoType:
     def __init__(self, df, discrete=[], continuous=[], continuous_to_discrete_limit = 20):
@@ -138,7 +177,7 @@ class DataFrame:
         return False
 
     @staticmethod
-    def coerce_to_numeric(df: pd.DataFrame, logger: logging.Logger, cutoff=0.10, ignore=[]):
+    def coerce_to_numeric(df: pd.DataFrame, logger: logging.Logger, cutoff=0.10, ignore=[]) -> pd.DataFrame:
         for col in df.columns:
             if col in ignore:
                 continue
@@ -292,14 +331,14 @@ class DataSet:
         self.data = df
         self._weight_column = weight_column
 
-    def subset(self, indices:List[int]):
+    def subset(self, indices:List[int]) -> 'DataSet':
         return DataSet(self.data.loc[indices], self._db_dir, self._logger, identifier=self.uuid)
 
     def get_reader_options(self):
         return bayesServer().data.ReaderOptions("ix") if self._weight_column is None \
             else bayesServer().data.ReaderOptions("ix", self._weight_column)
 
-    def get_dataframe(self):
+    def get_dataframe(self) -> pd.DataFrame:
         return self.data
 
     def get_connection(self):
@@ -310,9 +349,9 @@ class DataSet:
             os.makedirs(os.path.join(self._db_dir, "db"))
 
     def write(self):
-        self._logger.info("Writing {} rows to storage".format(len(self.data)))
+        self._logger.info("Writing rows to storage")
         dk.to_sql(self.data, self.table, self._engine)
-        self._logger.info("Finished writing {} rows to storage".format(len(self.data)))
+        self._logger.info("Finished writing rows to storage")
 
     def create_data_reader_command(self, indexes=[]):
         """
@@ -321,12 +360,14 @@ class DataSet:
         :return: a a DatabaseDataReaderCommand
         """
 
-        if len(indexes) == 0:
-            indexes = dk.compute(self.get_dataframe().index).tolist()
+        if len(indexes) > 0:
+            query = "select * from {} where ix in ({}) order by ix asc".format(self.table, ",".join(str(i) for i in indexes))
+        else:
+            query = "select * from {} order by ix asc".format(self.table)
 
         data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
             self.get_connection(),
-            "select * from {} where ix in ({})".format(self.table, ",".join(str(i) for i in indexes)))
+            query)
 
         return data_reader_command
 
