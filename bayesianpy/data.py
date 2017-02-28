@@ -66,6 +66,9 @@ class DataFrameReader:
         else:
             raise StopIteration
 
+    def __iter__(self):
+        return self
+
 class DataFrameWriter:
 
     def __init__(self):
@@ -140,7 +143,11 @@ class DataFrame:
 
     @staticmethod
     def is_timestamp(dtype):
-        return str(dtype) in ['timestamp64', 'timedelta64']
+        for ts in ['timestamp64', 'timedelta64', 'datetime64']:
+            if ts in str(dtype):
+                return True
+
+        return False
 
     @staticmethod
     def is_numeric(dtype):
@@ -179,8 +186,12 @@ class DataFrame:
     @staticmethod
     def coerce_to_numeric(df: pd.DataFrame, logger: logging.Logger, cutoff=0.10, ignore=[]) -> pd.DataFrame:
         for col in df.columns:
+            if DataFrame.is_timestamp(df[col].dtype):
+                continue
+
             if col in ignore:
                 continue
+
             values = df[col].dropna().unique()
             ratio = 0
             pre_length = len(values)
@@ -282,8 +293,12 @@ class DaskDataFrame:
 
 class Filter:
     @staticmethod
-    def remove_static_variables(df: pd.DataFrame):
-        column_names = df.apply(lambda x: len(x.unique()) > 1)
+    def remove_static_variables(df: pd.DataFrame, cutoff=1, logger:logging.Logger=None):
+        column_names = df.apply(lambda x: len(x.unique()) > cutoff)
+
+        if logger is not None:
+            logger.info("Removing {}".format(", ".join(df.columns[column_names == True])))
+
         return df[column_names[column_names == True].index.tolist()].copy()
 
     @staticmethod

@@ -410,6 +410,9 @@ class QueryLogLikelihood(QueryBase):
         if isinstance(variable_names, str):
             variable_names = [variable_names]
 
+        if len(variable_names) == 0:
+            raise ValueError("QueryLogLikelihood: Requires a non-empty list of variables for creating a distribution")
+
         self._variable_names = variable_names
         self._distribution = None
         self._query_distribution = None
@@ -418,6 +421,10 @@ class QueryLogLikelihood(QueryBase):
 
     def setup(self, network, inference_engine, query_options):
         variables = [bayesianpy.network.get_variable(network, n) for n in self._variable_names]
+
+        if len(variables) == 0:
+            raise ValueError("QueryLogLikelihood: Requires a non-empty list for creating a distribution")
+
         if len(variables) == 1:
             self._distribution = bayesServer().CLGaussian(variables[0])
         else:

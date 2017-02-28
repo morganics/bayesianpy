@@ -41,6 +41,8 @@ class Discrete:
     def __str__(self):
         return self.tostring()
 
+def get_node(network, node):
+    return network.getNodes().get(node)
 
 class Builder:
     @staticmethod
@@ -57,7 +59,7 @@ class Builder:
 
     @staticmethod
     def get_node(network, node):
-        return network.getNodes().get(node)
+        return get_node(network, node)
 
     @staticmethod
     def delete_link(network, n1, n2):
@@ -241,6 +243,11 @@ def remove_continuous_nodes(network):
         n.getNodes().remove(node)
 
     return n
+
+def get_continuous_nodes(network):
+    for node in network.getNodes():
+        if bayesianpy.network.is_variable_continuous(node.getVariables().get(0)):
+            yield node
 
 def get_continuous_variables(network):
     for variable in network.getVariables():
