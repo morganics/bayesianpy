@@ -3,6 +3,7 @@ import uuid
 from bayesianpy.jni import *
 from bayesianpy.data import DataFrame
 import os
+from typing import List
 
 
 def create_network():
@@ -184,7 +185,7 @@ class Builder:
         return n_
 
     @staticmethod
-    def create_discrete_variable(network, data, node_name, states):
+    def create_discrete_variable(network, df: pd.DataFrame, node_name: str, states:List[str]=None):
         n = Builder.try_get_node(network, node_name)
         if n is not None:
             return n
@@ -192,17 +193,20 @@ class Builder:
         v = bayesServer().Variable(node_name)
         n_ = bayesServer().Node(v)
 
+        if states is None:
+            states = df[node_name].dropna().unique()
+
         for s in states:
             v.getStates().add(bayesServer().State(str(s)))
 
-        if node_name in data.columns.tolist():
+        if node_name in df.columns.tolist():
 
-            if DataFrame.is_int(data[node_name].dtype) or DataFrame.could_be_int(data[node_name]):
+            if DataFrame.is_int(df[node_name].dtype) or DataFrame.could_be_int(df[node_name]):
                 v.setStateValueType(bayesServer().StateValueType.INTEGER)
                 for state in v.getStates():
                     state.setValue(jp.java.lang.Integer(int(float(state.getName()))))
 
-            if DataFrame.is_bool(data[node_name].dtype):
+            if DataFrame.is_bool(df[node_name].dtype):
                 v.setStateValueType(bayesServer().StateValueType.BOOLEAN)
                 for state in v.getStates():
                     state.setValue(state.getName() == 'True')
