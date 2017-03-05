@@ -288,28 +288,37 @@ class QueryConditionalJointProbability(QueryBase):
                 tv = bayesianpy.network.get_variable(self._network, v)
                 yield [state for state in tv.getStates()]
 
-        for state_combinations in itertools.product(*state_generator(self._tail_variables)):
+        if len(self._head_variables) == 2 and len(self._tail_variables) == 0:
+            h0 = bayesianpy.network.get_variable(self._network, self._head_variables[0])
+            h1 = bayesianpy.network.get_variable(self._network, self._head_variables[1])
+            results.update({
+                    "{}_{}_covariance".format(h0.getName(), h1.getName()): self._distribution.getCovariance(h0, h1),
+                    "{}_mean".format(h0.getName()): self._distribution.getMean(h0),
+                    "{}_mean".format(h1.getName()): self._distribution.getMean(h1)
+                })
+        else:
+            for state_combinations in itertools.product(*state_generator(self._tail_variables)):
 
-            state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
-            for i, state in enumerate(state_combinations):
-                state_array[i] = state
+                state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
+                for i, state in enumerate(state_combinations):
+                    state_array[i] = state
 
-            dist = Distribution(self._head_variables, self._tail_variables,
-                                     [state.getName() for state in state_combinations])
+                dist = Distribution(self._head_variables, self._tail_variables,
+                                         [state.getName() for state in state_combinations])
 
-            for i,h in enumerate(self._head_variables):
-                v = bayesianpy.network.get_variable(self._network, h)
-                mean = self._distribution.getMean(v, state_array)
-                if dist.is_covariant():
-                    dist.append_mean(mean)
-                    for j,h1 in enumerate(self._head_variables):
-                        v1 = bayesianpy.network.get_variable(self._network, h1)
-                        cov = self._distribution.getCovariance(v, v1, state_array)
-                        dist.set_covariance_value(i, j, cov)
-                else:
-                    dist.set_mean_variance(mean, self._distribution.getVariance(v, state_array))
+                for i,h in enumerate(self._head_variables):
+                    v = bayesianpy.network.get_variable(self._network, h)
+                    mean = self._distribution.getMean(v, state_array)
+                    if dist.is_covariant():
+                        dist.append_mean(mean)
+                        for j,h1 in enumerate(self._head_variables):
+                            v1 = bayesianpy.network.get_variable(self._network, h1)
+                            cov = self._distribution.getCovariance(v, v1, state_array)
+                            dist.set_covariance_value(i, j, cov)
+                    else:
+                        dist.set_mean_variance(mean, self._distribution.getVariance(v, state_array))
 
-            results.update({dist.key(): dist})
+                results.update({dist.key(): dist})
         return results
 
 
@@ -339,7 +348,9 @@ class QueryStatistics(QueryBase):
     def results(self, inference_engine, query_output):
         result = {}
         if self._calc_loglikelihood:
-            result.update({self._loglikelihood_column: query_output.getLogLikelihood().floatValue()})
+            ll = query_output.getLogLikelihood()
+            value = ll.floatValue() if ll is not None else np.nan
+            result.update({self._loglikelihood_column: value})
 
         if self._calc_conflict:
             result.update({self._conflict_column: query_output.getConflict().floatValue()})
@@ -380,6 +391,7 @@ class QueryMostLikelyState(QueryBase):
 
     def results(self, inference_engine, query_output):
         states = {}
+
         for state in self._variable.getStates():
             states.update({state.getName(): self._distribution.get([state])})
 
@@ -392,14 +404,19 @@ class QueryMostLikelyState(QueryBase):
 
 class QueryStateProbability(QueryMostLikelyState):
 
-    def __init__(self, target_variable_name, suffix="_probability"):
+    def __init__(self, target_variable_name, variable_state_separator=bayesianpy.network.STATE_DELIMITER,
+                        suffix="_probability"):
         super().__init__(target_variable_name=target_variable_name, output_dtype="float64", suffix=suffix)
+        self._variable_state_separator = variable_state_separator
+
+    def setup(self, network, inference_engine, query_options):
+        super().setup(network, inference_engine, query_options)
 
     def results(self, inference_engine, query_output):
         states = {}
         for state in self._variable.getStates():
             p = self._distribution.get([state])
-            states.update({self._target_variable_name + bayesianpy.network.STATE_DELIMITER + state.getName()
+            states.update({self._target_variable_name + self._variable_state_separator + state.getName()
                            + self._suffix: p})
 
         return states
