@@ -297,7 +297,7 @@ class Filter:
         column_names = df.apply(lambda x: len(x.unique()) > cutoff)
 
         if logger is not None:
-            logger.info("Removing {}".format(", ".join(df.columns[column_names == True])))
+            logger.info("Removing {}".format(", ".join(df.columns[column_names == False])))
 
         return df[column_names[column_names == True].index.tolist()].copy()
 
