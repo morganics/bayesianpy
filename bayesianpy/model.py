@@ -38,9 +38,6 @@ class QueryBase:
     def results(self, inference_engine, query_output) -> dict:
         pass
 
-    def use_pandas(self):
-        return True
-
 
 class InferenceEngine:
     _inference_factory = None
@@ -430,6 +427,10 @@ class QueryLogLikelihood(QueryBase):
         if len(variable_names) == 0:
             raise ValueError("QueryLogLikelihood: Requires a non-empty list of variables for creating a distribution")
 
+        if len(set(variable_names)) != len(variable_names):
+            raise ValueError("QueryLogLikelihood: There are duplicate variable names in the query: {}".format(", ".join(variable_names)))
+
+
         self._variable_names = variable_names
         self._distribution = None
         self._query_distribution = None
@@ -464,6 +465,9 @@ class QueryLogLikelihood(QueryBase):
 
         result.update({name: value})
         return result
+
+    def __str__(self):
+        return "{}: {}".format(__name__, ", ".join(self._variable_names))
 
 
 class QueryMeanVariance(QueryBase):
@@ -501,54 +505,63 @@ class QueryMeanVariance(QueryBase):
 def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_name: str,
                  variable_references: List[str],
                  queries, logger, i):
-    bayesianpy.jni.attach(logger, heap_space='1g')
-    data_reader = bayesServer().data.DatabaseDataReaderCommand(
-        connection_string,
-        "select * from {} where ix in ({})".format(table_name,
-                                                   ",".join(str(i) for i in dk.compute(df.index).tolist()))).executeReader()
-
-    network = bayesianpy.network.create_network_from_string(network)
-    reader_options = bayesServer().data.ReaderOptions("ix")
-    variable_refs = list(bayesianpy.network.create_variable_references(network, df,
-                                                                       variable_references=variable_references))
-
-    reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
-                                                      reader_options)
-
-    factory = InferenceEngine(network)
-    (inference_engine, query_options, query_output) = factory.create()
-
-    for query in queries:
-        query.setup(network, inference_engine, query_options)
-
-    results = []
     try:
-        while reader.read(inference_engine.getEvidence(), bayesServer().data.DefaultReadOptions(True)):
-            result = {}
+        bayesianpy.jni.attach(logger, heap_space='1g')
+        data_reader = bayesServer().data.DatabaseDataReaderCommand(
+            connection_string,
+            "select * from {} where ix in ({})".format(table_name,
+                                                       ",".join(str(i) for i in dk.compute(df.index).tolist()))).executeReader()
 
-            try:
-                inference_engine.query(query_options, query_output)
-            except BaseException as e:
-                logger.error(e)
-                # inference_engine.getEvidence().clear()
-                # continue
+        network = bayesianpy.network.create_network_from_string(network)
+        reader_options = bayesServer().data.ReaderOptions("ix")
+        variable_refs = list(bayesianpy.network.create_variable_references(network, df,
+                                                                           variable_references=variable_references))
 
-            for query in queries:
-                result = {**result, **query.results(inference_engine, query_output)}
+        reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
+                                                          reader_options)
 
-            inference_engine.getEvidence().clear()
-            result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
+        factory = InferenceEngine(network)
+        (inference_engine, query_options, query_output) = factory.create()
 
-            results.append(result)
+        for query in queries:
+            query.setup(network, inference_engine, query_options)
 
-            if i % 500 == 0:
-                logger.info("Queried case {}".format(i))
+        results = []
+        try:
+            while reader.read(inference_engine.getEvidence(), bayesServer().data.DefaultReadOptions(True)):
+                result = {}
 
-            i += 1
-    finally:
-        reader.close()
-        # bayespy.jni.detach()
-    return results
+                try:
+                    inference_engine.query(query_options, query_output)
+                except BaseException as e:
+                    logger.error(e)
+                    # inference_engine.getEvidence().clear()
+                    # continue
+
+                for query in queries:
+                    result = {**result, **query.results(inference_engine, query_output)}
+
+                inference_engine.getEvidence().clear()
+                result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
+
+                results.append(result)
+
+                if i % 500 == 0:
+                    logger.info("Queried case {}".format(i))
+
+                i += 1
+        except BaseException as e:
+            logger.error("Unexpected Error: {}".format(e))
+        finally:
+            reader.close()
+            # bayespy.jni.detach()
+        return results
+
+    except BaseException as e:
+        q = [str(query) for query in queries]
+
+        logger.error("Unexpected Error: {}. Using queries: {}".format(e, r"\n ".join(q)))
+
 
 
 class BatchQuery:
