@@ -103,8 +103,8 @@ class JointDistribution:
 
         # Width and height are "full" widths, not radius
         width, height = 2 * nstd * np.sqrt(vals)
-        ellip = Ellipse(xy=pos, width=width, height=height, angle=theta, **kwargs)
-
+        ellip = Ellipse(xy=pos, width=width, height=height, angle=theta,
+                        **kwargs)
         ax.add_artist(ellip)
         return ellip
 
@@ -125,21 +125,31 @@ class JointDistribution:
                 sns.distplot(s[hv], hist=False, label=v.pretty_print_tail(), ax=ax)
 
     def plot_distribution_with_covariance(self, ax, df: pd.DataFrame, head_variables: tuple,
-                                          results: Dict[str, bayesianpy.model.Distribution]):
+                                          results: Dict[str, bayesianpy.model.Distribution], labels=None):
 
         hv = head_variables
 
-        ax.plot(df[hv[0]].tolist(), df[hv[1]].tolist(), 'bo')
+        ax.plot(df[hv[0]].tolist(), df[hv[1]].tolist(), 'o', markeredgecolor='#e2edff', markeredgewidth=1,marker='o',
+                                        fillstyle='full', color='#84aae8')
         #ax.set_title("{} vs {}".format(hv[0], hv[1]))
         for k, v in results.items():
             self._plot_cov_ellipse(cov=v.get_cov_by_variable(hv[0], hv[1]),
                                    pos=v.get_mean_by_variable(hv[0], hv[1]),
-                                   nstd=3, alpha=0.5, color='green', ax=ax)
+                                   nstd=3, edgecolor='#ffb24f', lw=2, facecolor='none',
+                                   ax=ax)
 
         ax.set_xlim([df[hv[0]].min() - 3, df[hv[0]].max() + 3])
         ax.set_ylim([df[hv[1]].min() - 3, df[hv[1]].max() + 3])
-        ax.set_xlabel(hv[0])
-        ax.set_ylabel(hv[1])
+
+        if labels is not None:
+            label0 = labels[0]
+            label1 = labels[1]
+        else:
+            label0 = hv[0]
+            label1 = hv[1]
+
+        ax.set_xlabel(label0)
+        ax.set_ylabel(label1)
 
     def plot_with_variance(self, df: pd.DataFrame,
                            head_variables: List[str],

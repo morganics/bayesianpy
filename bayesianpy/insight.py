@@ -1,11 +1,14 @@
 import pandas as pd
 from bayesianpy.network import Discrete
 import bayesianpy.network
+import bayesianpy.template
 import numpy as np
 from collections import Counter
 import bayesianpy.data
 import bayesianpy.jni
 from bayesianpy.jni import jp
+import logging
+from typing import Dict
 
 
 class _AutoInsight:
@@ -18,14 +21,20 @@ class _AutoInsight:
         self._target = target
         (self._inf_engine, _, _) = bayesianpy.model.InferenceEngine(network).create(retract=False)
 
-    def calculate(self, evidence=[], sort_by=['difference']):
+    def get_network(self):
+        return self._network
+
+    def get_network_model(self):
+        return bayesianpy.model.NetworkModel(self._network, self._logger)
+
+    def calculate(self, evidence:Dict[str, object]=None, sort_by=['difference']):
 
         variables = jp.java.util.Arrays.asList(
             [v for v in self._network.getVariables() if v.getName() != self._target.variable])
 
         ai = bayesianpy.jni.bayesServerAnalysis().AutoInsight
 
-        if len(evidence) > 0:
+        if evidence is not None:
             e = bayesianpy.model.Evidence(self._network, self._inf_engine)
             evidence_obj = e.apply(evidence)
             auto_insight_output = ai.calculate(self._target_state, variables,
@@ -55,22 +64,29 @@ class _AutoInsight:
 
 
 class AutoInsight:
-    def __init__(self, template, target, logger, comparison_models=3):
+    def __init__(self, network_factory: bayesianpy.network.NetworkFactory, template: bayesianpy.template.Template,
+                 dataset: bayesianpy.data.DataSet,
+                 target: bayesianpy.network.Discrete, logger: logging.Logger, comparison_models=3):
+
         self._network_template = template
         self._logger = logger
-        self._data_store = template.get_network_factory().get_datastore()
+        self._network_factory = network_factory
+        self._dataset = dataset
         self._model_cache = []
         self._comparison_model_count = comparison_models
         self._target = target
+
+    def get_models(self):
+        return self._create_models()
 
     def _create_models(self):
         if len(self._model_cache) > 0:
             return self._model_cache
 
         for i in range(self._comparison_model_count):
-            network = self._network_template.create()
-            model = bayesianpy.model.NetworkModel(network, self._data_store, self._logger)
-            model.train()
+            network = self._network_template.create(self._network_factory)
+            model = bayesianpy.model.NetworkModel(network, self._logger)
+            model.train(self._dataset)
             self._model_cache.append(_AutoInsight(network, self._target, self._logger))
 
         return self._model_cache
@@ -142,7 +158,7 @@ class AutoInsight:
         rows = rows.groupby(by=['variable', 'state']).mean().sort_values(by=['difference'], ascending=[False])
         return rows[rows.probability_given_other < 0.02].head(top).reset_index()
 
-    def get_insightful_states(self, using='difference', top=10):
+    def get_insightful_states(self, using='difference', evidence: Dict[str, object]=None, top=10):
         if using not in ['lift', 'difference']:
             raise ValueError("Expecting either lift or difference in the using parameter. Difference favours probability"
                              " changes with a higher likelihood of occurring, while lift favours relative changes in probability"
@@ -151,7 +167,7 @@ class AutoInsight:
         models = self._create_models()
         rows = pd.DataFrame()
         for model in models:
-            rows = rows.append(model.calculate(), ignore_index=True)
+            rows = rows.append(model.calculate(evidence=evidence), ignore_index=True)
 
         return rows.groupby(by=['variable', 'state']).mean().sort_values(by=[using], ascending=False).head(
             top).reset_index()

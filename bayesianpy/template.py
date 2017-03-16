@@ -118,18 +118,23 @@ class NetworkWithoutEdges(Template):
 
 class DiscretisedMixtureNaiveBayes(Template):
 
-    def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10):
+    def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, bin_count=4,
+                 binning_mode='EqualFrequencies'):
         super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._logger = logger
+        self._bin_count = bin_count
+        self._binning_mode = binning_mode
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = network_factory.create()
-        cluster = builder.create_cluster_variable(network, 5)
+        cluster = builder.create_cluster_variable(network, self._latent_states)
 
         if not self._continuous.empty:
             for c_name in self._continuous.columns:
-                c = builder.create_discretised_variable(network, self._continuous, c_name)
+                c = builder.create_discretised_variable(network, self._continuous, c_name, bin_count=self._bin_count,
+                                                        mode=self._binning_mode)
+
                 builder.create_link(network, cluster, c)
 
         if not self._discrete.empty:
