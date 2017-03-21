@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 import logging
@@ -21,17 +21,17 @@ class DataFrameReader:
         self._columns = df.columns.tolist()
         self.reset()
         self.row_index = 0
-        self._writer = DataFrameWriter()
+        self._writer = DataFrameWriter(df)
 
     def __getattr__(self, key):
         return self.__getitem__(key)
 
-    def read(self):
+    def read(self) -> bool:
         self._row = next(self._iterator, None)
         self.row_index += 1
         return self._row is not None
 
-    def reset(self):
+    def reset(self) -> None:
         self._iterator = self._df.itertuples()
 
     def get_index(self):
@@ -40,19 +40,22 @@ class DataFrameReader:
     def to_dict(self):
         return self.row()
 
-    def tolist(self, cols):
+    def tolist(self, cols) -> List[object]:
         return [self.__getitem__(c) for c in cols]
 
-    def row(self):
+    def row(self) -> Dict[str, object]:
         return {c : self.__getitem__(c) for c in self._columns}
 
-    def writer(self):
+    def writer(self) -> 'DataFrameWriter':
         if self._row is not None:
             return self._writer.with_index(self.get_index())
         else:
             return self._writer
 
-    def __getitem__(self, key):
+    def set_value(self, column, value):
+        self.writer().set_value(column, value)
+
+    def __getitem__(self, key) -> object:
         # the df index of the row is at index 0
         try:
             ix = self._columns.index(key) + 1
@@ -60,20 +63,21 @@ class DataFrameReader:
         except BaseException as e:
             return None
 
-    def __next__(self):
+    def __next__(self) -> 'DataFrameReader':
         if self.read():
             return self
         else:
             raise StopIteration
 
-    def __iter__(self):
+    def __iter__(self) -> 'DataFrameReader':
         return self
 
 class DataFrameWriter:
 
-    def __init__(self):
+    def __init__(self, df):
         self._columns = defaultdict(list)
         self._row_indices = set()
+        self._df = df
 
     def with_index(self, index):
         if index not in self._row_indices:
@@ -90,9 +94,12 @@ class DataFrameWriter:
         df = pd.DataFrame(self._columns)
         return df.set_index('ix')
 
-    def flush(self, df: pd.DataFrame):
+    def get_dataframe(self, df: pd.DataFrame = None):
         df1 = self.as_dataframe()
-        return df.join(df1)
+        if df is None:
+            return self._df.join(df1)
+        else:
+            return df.join(df1)
 
 
 

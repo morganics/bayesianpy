@@ -472,9 +472,9 @@ class QueryLogLikelihood(QueryBase):
 
 class QueryMeanVariance(QueryBase):
     def __init__(self, variable_name, retract_evidence=True, result_mean_suffix='_mean',
-                 result_variance_suffix='_variance', output_dtype=None):
+                 result_variance_suffix='_variance', output_dtype=None, default_value=np.nan):
         self._variable_name = variable_name
-
+        self._default_value = default_value
         self._result_mean_suffix = result_mean_suffix
         self._result_variance_suffix = result_variance_suffix
         self._retract_evidence = retract_evidence
@@ -495,8 +495,13 @@ class QueryMeanVariance(QueryBase):
 
     def results(self, inference_engine, query_output):
         mean = self._query.getMean(self._variable)
+
         if self._output_dtype is not None:
             mean = bayesianpy.data.DataFrame.cast2(self._output_dtype, mean)
+
+        if np.isnan(mean):
+            return {self._variable_name + self._result_mean_suffix: self._default_value,
+                self._variable_name + self._result_variance_suffix: self._default_value}
 
         return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
