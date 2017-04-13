@@ -402,9 +402,10 @@ class QueryMostLikelyState(QueryBase):
 class QueryStateProbability(QueryMostLikelyState):
 
     def __init__(self, target_variable_name, variable_state_separator=bayesianpy.network.STATE_DELIMITER,
-                        suffix="_probability"):
+                        suffix="_probability", target_state_name: str=None):
         super().__init__(target_variable_name=target_variable_name, output_dtype="float64", suffix=suffix)
         self._variable_state_separator = variable_state_separator
+        self._target_state_name = target_state_name
 
     def setup(self, network, inference_engine, query_options):
         super().setup(network, inference_engine, query_options)
@@ -412,10 +413,12 @@ class QueryStateProbability(QueryMostLikelyState):
     def results(self, inference_engine, query_output):
         states = {}
         for state in self._variable.getStates():
+            if self._target_state_name is not None and state.getName() != self._target_state_name:
+                continue
+
             p = self._distribution.get([state])
             states.update({self._target_variable_name + self._variable_state_separator + state.getName()
                            + self._suffix: p})
-
         return states
 
 
@@ -473,6 +476,7 @@ class QueryLogLikelihood(QueryBase):
 class QueryMeanVariance(QueryBase):
     def __init__(self, variable_name, retract_evidence=True, result_mean_suffix='_mean',
                  result_variance_suffix='_variance', output_dtype=None, default_value=np.nan):
+
         self._variable_name = variable_name
         self._default_value = default_value
         self._result_mean_suffix = result_mean_suffix
@@ -482,6 +486,9 @@ class QueryMeanVariance(QueryBase):
 
     def setup(self, network, inference_engine, query_options):
         self._variable = bayesianpy.network.get_variable(network, self._variable_name)
+
+        if not bayesianpy.network.get_variable(network, self._variable_name):
+            raise ValueError("Variable {} does not exist in the network".format(self._variable_name))
 
         if not bayesianpy.network.is_variable_continuous(self._variable):
             raise ValueError("{} needs to be continuous.".format(self._variable_name))
@@ -505,6 +512,9 @@ class QueryMeanVariance(QueryBase):
 
         return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
+
+    def __str__(self):
+        return "P({})".format(self._variable_name)
 
 
 def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_name: str,
@@ -683,11 +693,11 @@ class NetworkModel:
     def get_network(self):
         return self._jnetwork
 
-    def save(self, path):
+    def save(self, path, encoding='utf-8'):
         from xml.dom import minidom
         nt = self._jnetwork.saveToString()
         reparsed = minidom.parseString(nt)
-        with open(path, 'w') as fh:
+        with open(path, 'w', encoding=encoding) as fh:
             fh.write(reparsed.toprettyxml(indent="  "))
 
     def is_trained(self):
