@@ -9,9 +9,16 @@ from typing import List
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
 
-def create_network_from_file(path):
+def create_network_from_file(path, encoding='utf-8'):
     network = create_network()
-    network.load(path)
+
+    if encoding != 'utf-8':
+        with open(path, mode='r', encoding=encoding) as fh:
+            str = fh.read()
+            network.loadFromString(str, encoding)
+    else:
+        network.load(path)
+
     return network
 
 def create_network_from_string(path):
@@ -343,13 +350,14 @@ def is_trained(network):
 
 
 class NetworkFactory:
-    def __init__(self, logger, network_file_path = None, network = None):
+    def __init__(self, logger, network_file_path = None, network = None, encoding='utf-8'):
         self._logger = logger
         self._network_file_path = network_file_path
         self._network = network
+        self._encoding = encoding
 
     def create_from_file(self, path):
-        return create_network_from_file(path)
+        return create_network_from_file(path, self._encoding)
 
     def create(self):
         if self._network is not None:
