@@ -193,6 +193,9 @@ class DataFrame:
     @staticmethod
     def coerce_to_numeric(df: pd.DataFrame, logger: logging.Logger, cutoff=0.10, ignore=[]) -> pd.DataFrame:
         for col in df.columns:
+            if DataFrame.is_numeric(df[col].dtype):
+                continue
+
             if DataFrame.is_timestamp(df[col].dtype):
                 continue
 
