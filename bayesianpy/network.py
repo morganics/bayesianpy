@@ -15,7 +15,7 @@ def create_network_from_file(path, encoding='utf-8'):
     if encoding != 'utf-8':
         with open(path, mode='r', encoding=encoding) as fh:
             str = fh.read()
-            network.loadFromString(str, encoding)
+            network.loadFromString(str)
     else:
         network.load(path)
 
