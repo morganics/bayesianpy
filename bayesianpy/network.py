@@ -52,6 +52,9 @@ class Discrete:
 def get_node(network, node):
     return network.getNodes().get(node)
 
+def get_variable_from_node(node):
+    return node.getVariables()[0]
+
 class Builder:
     @staticmethod
     def get_variable(network, variable):
