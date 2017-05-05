@@ -3,6 +3,8 @@ import os
 import bayesianpy.utils
 import platform
 
+BAYES_SERVER_VERSION = "7.13"
+
 def attach_thread(logger=None):
     if not jp.isThreadAttachedToJVM():
         if logger is not None:
@@ -19,7 +21,7 @@ def attach(logger=None, heap_space='6g'):
         if platform.system() == "Linux":
             separator = ":"
 
-        classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-7.8.jar'),
+        classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-{}.jar'.format(BAYES_SERVER_VERSION)),
                                            os.path.join(path_to_package, 'bin/sqlite-jdbc-3.8.11.2.jar'))
 
         if logger is not None:
