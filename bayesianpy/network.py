@@ -323,10 +323,13 @@ def create_variable_references(network, data, variable_references=[]):
 
         valueType = bayesServer().data.ColumnValueType.VALUE
 
-        if v.getStateValueType() != bayesServer().StateValueType.DOUBLE_INTERVAL \
+        if v.getStateValueType() == bayesServer().StateValueType.NONE:
+            valueType = bayesServer().data.ColumnValueType.NAME
+        elif v.getStateValueType() != bayesServer().StateValueType.DOUBLE_INTERVAL \
                 and bayesianpy.network.is_variable_discrete(v):
 
-            if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype):
+            if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype)\
+                    and not DataFrame.is_float(data[name].dtype):
                 valueType = bayesServer().data.ColumnValueType.NAME
 
         yield bayesServer().data.VariableReference(v, valueType, name)
