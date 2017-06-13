@@ -97,6 +97,14 @@ class Builder:
             network.getLinks().remove(to_remove)
 
     @staticmethod
+    def delete_links_from(network, node):
+        if isinstance(node, str):
+            node = Builder.get_node(network, node)
+
+        for link in list(node.getLinksOut()):
+            network.getLinks().remove(link)
+
+    @staticmethod
     def create_link(network, n1, n2, t=None):
         if isinstance(n1, str):
             n1_name = n1
@@ -225,6 +233,9 @@ class Builder:
 
         return n_
 
+def get_node_names(nt):
+    return [node.getName() for node in nt.getNodes()]
+
 def is_variable_discrete(v):
     return v.getValueType() == bayesServer().VariableValueType.DISCRETE
 
@@ -257,6 +268,26 @@ def remove_continuous_nodes(network):
         n.getNodes().remove(node)
 
     return n
+
+def remove_single_state_nodes(network):
+    to_remove = []
+    for node in get_nodes(network):
+        print(node.getName())
+        if node.getName() == "Exr_D700":
+            print("HEre!")
+        v = get_variable_from_node(node)
+        if is_variable_discrete(v):
+            if len(v.getStates()) <= 1:
+                to_remove.append(node)
+
+    for node in to_remove:
+        remove_node(network, node)
+
+    return network
+
+def get_nodes(network):
+    for node in network.getNodes():
+        yield node
 
 def get_continuous_nodes(network):
     for node in network.getNodes():
