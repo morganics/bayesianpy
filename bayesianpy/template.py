@@ -3,7 +3,7 @@ import pandas as pd
 import bayesianpy.network
 from bayesianpy.jni import *
 import bayesianpy.dask as dk
-
+import logging
 
 class Template:
     def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
@@ -11,7 +11,16 @@ class Template:
         self._continuous = continuous
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
-        pass
+        return network_factory.create()
+
+
+class Tpl(Template):
+    def __init__(self):
+        super().__init__()
+
+    def create(self, network_factory: bayesianpy.network.NetworkFactory):
+        super().create(network_factory)
+
 
 class NaiveBayes(Template):
     def __init__(self, parent_node: str, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), discrete_states={}):
@@ -90,12 +99,13 @@ class MixtureNaiveBayes(Template):
 
         return network
 
-class NetworkWithoutEdges(Template):
+class WithoutEdges(Template):
     def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10,
-                 discrete_states={}):
+                 discrete_states={}, blanks=None):
         super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._discrete_states = discrete_states
+        self._blanks = blanks
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = network_factory.create()
@@ -107,12 +117,7 @@ class NetworkWithoutEdges(Template):
 
         if not self._discrete.empty:
             for d_name in self._discrete.columns:
-                if d_name in self._discrete_states:
-                    states = self._discrete_states[d_name]
-                else:
-                    states = self._discrete[d_name].dropna().unique()
-
-                builder.create_discrete_variable(network, self._discrete, d_name, states)
+                builder.create_discrete_variable(network, self._discrete, d_name, blanks=self._blanks)
 
         return network
 
@@ -146,81 +151,102 @@ class DiscretisedMixtureNaiveBayes(Template):
         return network
 
 class AutoStructure(Template):
-    def __init__(self, template, data_store, logger):
+    def __init__(self, template, dataset:bayesianpy.data.DataSet, logger:logging.Logger, use_same_model=True,
+                 engine='PC', root_node:str=None):
         super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
-        self._data_store = data_store
         self._logger = logger
+        self._use_same_model = use_same_model
+        self._links = []
+        self._engine = engine
+        self._root_node = root_node
+        self._dataset = dataset
 
-    def learn(self, network_factory: bayesianpy.network.NetworkFactory):
+    def learn(self, network):
 
-        data_reader_command = self._data_store.create_data_reader_command()
+        if len(self._links) > 0 and self._use_same_model:
+            return self._links
+
+        data_reader_command = self._dataset.create_data_reader_command()
 
         reader_options = bayesServer().data.ReaderOptions()
-        network = self._template.create(network_factory)
         network.getLinks().clear()
 
-        variable_references = list(bayesianpy.network.create_variable_references(network, self._data_store.get_dataframe()))
+        variable_references = list(bayesianpy.network.create_variable_references(network, self._dataset.get_dataframe()))
         evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command, jp.java.util.Arrays.asList(variable_references), reader_options)
 
-        options = bayesServerStructure().PCStructuralLearningOptions()
-        options.setMaximumConditional(2)
-        self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
-        output = bayesServerStructure().PCStructuralLearning().learn(evidence_reader_command, jp.java.util.Arrays.asList(network.getNodes().toArray()),
+        if self._engine == 'PC':
+            options = bayesServerStructure().PCStructuralLearningOptions()
+            options.setMaximumConditional(2)
+            self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
+            output = bayesServerStructure().PCStructuralLearning().learn(evidence_reader_command, jp.java.util.Arrays.asList(network.getNodes().toArray()),
                                                                  options)
+        elif self._engine == 'TAN':
+            options = bayesServerStructure().TANStructuralLearningOptions()
+            options.setTarget(bayesianpy.network.get_node(network, self._root_node))
+            self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
+            output = bayesServerStructure().TANStructuralLearning().learn(evidence_reader_command,
+                                                                         jp.java.util.Arrays.asList(
+                                                                             network.getNodes().toArray()),
+                                                                                options)
 
         self._logger.info("Created {} links.".format(len(output.getLinkOutputs())))
 
         for link in output.getLinkOutputs():
-            self._logger.debug("Link added from {} -> {}".format(
-                              link.getLink().getFrom().getName(),
-                              link.getLink().getTo().getName()))
+            self._links.append((link.getLink().getFrom().getName(), link.getLink().getTo().getName()))
 
-        return output
+        return self._links
 
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = self._template.create(network_factory)
 
-        for link in self.learn(network_factory).getLinkOutputs():
+        for link_from, link_to in self.learn(network):
             try:
-                builder.create_link(network, link.getLink().getFrom().getName(), link.getLink().getTo().getName())
+                builder.create_link(network, link_from, link_to)
             except ValueError:
-                self._logger.warn("Could not add link from {} to {}".format(link.getLink().getFrom().getName(), link.getLink().getTo().getName()))
+                self._logger.warning("Could not add link from {} to {}".format(link_from, link_to))
 
         return network
 
+from typing import List
 class WithDiscretisedVariables(Template):
-    def __init__(self, template: Template, logger, discretised_variables=[], bins=[], mode='EqualFrequencies'):
+    def __init__(self, template: Template, logger, discretised_variables:List[str]=None, bins:List[int]=None,
+                 mode='EqualFrequencies', default_bin_count:int=4):
+
         super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._discretised_variables = discretised_variables
         self._logger = logger
         self._bins = bins
         self._mode = mode
+        self._default_bin_count = default_bin_count
 
-        if len(self._bins) != len(self._discretised_variables):
-            raise ValueError("Bins and variables count should be the same")
+        if discretised_variables is None:
+            self._discretised_variables = template._continuous
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
-        network = network_factory.create()
+        network = self._template.create(network_factory)
         for i, var in enumerate(self._discretised_variables):
             node = builder.get_node(network, var)
-            if node is None:
-                raise ValueError("{} does not exist".format(var))
+            if node is not None:
 
-            links_from = [link.getFrom() for link in node.getLinks() if link.getFrom().getName() != var]
-            links_to = [link.getTo() for link in node.getLinks() if link.getTo().getName() != var]
+                links_from = [link.getFrom() for link in node.getLinks() if link.getFrom().getName() != var]
+                links_to = [link.getTo() for link in node.getLinks() if link.getTo().getName() != var]
 
-            network.getNodes().remove(node)
+                network.getNodes().remove(node)
 
-            n = builder.create_discretised_variable(network, network_factory.get_data(), var,
-                                                    bin_count=self._bins[i], mode=self._mode)
-            for l in links_from:
-                builder.create_link(network, l, n)
+            bin_count = self._default_bin_count if self._bins is None else self._bins[i]
 
-            for l in links_to:
-                builder.create_link(network, n, l)
+            n = builder.create_discretised_variable(network, self._continuous, var,
+                                                    bin_count=bin_count, mode=self._mode)
+
+            if node is not None:
+                for l in links_from:
+                    builder.create_link(network, l, n)
+
+                for l in links_to:
+                    builder.create_link(network, n, l)
 
         return network
 
@@ -241,6 +267,32 @@ class With0Nodes(Template):
                                   (0.5, jp.java.lang.Double.POSITIVE_INFINITY, "closed", "closed")])
 
                 builder.create_link(network, n, node)
+        return network
+
+
+class WithLatentNode(Template):
+
+    def __init__(self, template, logger, latent_states=5, target_node:str=None):
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
+        self._template = template
+        self._latent_states = latent_states
+        self._logger = logger
+        self._target_node = target_node
+
+    def create(self, network_factory: bayesianpy.network.NetworkFactory):
+        network = self._template.create(network_factory)
+
+        cluster = builder.create_cluster_variable(network, self._latent_states)
+
+        for node in bayesianpy.network.get_nodes(network):
+            if node == cluster:
+                continue
+            builder.create_link(network, cluster, node)
+
+        if self._target_node is not None:
+            node = builder.get_node(network, self._target_node)
+            builder.delete_links_from(network, node)
+
         return network
 
 
