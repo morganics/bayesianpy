@@ -4,7 +4,7 @@ from bayesianpy.jni import *
 from bayesianpy.data import DataFrame
 import os
 from typing import List
-
+import numpy as np
 
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
@@ -203,7 +203,7 @@ class Builder:
         return n_
 
     @staticmethod
-    def create_discrete_variable(network, df: pd.DataFrame, node_name: str, states:List[str]=None):
+    def create_discrete_variable(network, df: pd.DataFrame, node_name: str, states:List[str]=None, blanks=None):
         n = Builder.try_get_node(network, node_name)
         if n is not None:
             return n
@@ -212,7 +212,10 @@ class Builder:
         n_ = bayesServer().Node(v)
 
         if states is None:
-            states = df[node_name].dropna().unique()
+            if blanks is not None:
+                states = df[node_name].replace(np.nan, blanks).unique()
+            else:
+                states = df[node_name].dropna().unique()
 
         for s in states:
             v.getStates().add(bayesServer().State(str(s)))
@@ -272,9 +275,7 @@ def remove_continuous_nodes(network):
 def remove_single_state_nodes(network):
     to_remove = []
     for node in get_nodes(network):
-        print(node.getName())
-        if node.getName() == "Exr_D700":
-            print("HEre!")
+
         v = get_variable_from_node(node)
         if is_variable_discrete(v):
             if len(v.getStates()) <= 1:
