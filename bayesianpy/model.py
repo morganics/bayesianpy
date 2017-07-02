@@ -23,7 +23,7 @@ import math
 import bayesianpy.dask as dk
 
 from typing import List, Dict
-
+import traceback
 
 class QueryOutput:
     def __init__(self, continuous, discrete):
@@ -417,8 +417,12 @@ class QueryStateProbability(QueryMostLikelyState):
                 continue
 
             p = self._distribution.get([state])
-            states.update({self._target_variable_name + self._variable_state_separator + state.getName()
+            if self._target_state_name is not None:
+                states.update({self._target_variable_name + self._suffix: p})
+            else:
+                states.update({self._target_variable_name + self._variable_state_separator + state.getName()
                            + self._suffix: p})
+
         return states
 
 
@@ -462,7 +466,7 @@ class QueryLogLikelihood(QueryBase):
         ll = self._query_distribution.getLogLikelihood()
         value = ll.floatValue() if ll is not None else np.nan
         if self._append_variable_names:
-            name = {":".join(self._variable_names) + self._column_name}
+            name = ":".join(self._variable_names) + self._column_name
         else:
             name = self._column_name
 
@@ -566,7 +570,8 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
 
                 i += 1
         except BaseException as e:
-            logger.error("Unexpected Error: {}".format(e))
+            logger.error("Unexpected Error!")
+            logger.error(e)
         finally:
             reader.close()
             # bayespy.jni.detach()
@@ -587,7 +592,7 @@ class BatchQuery:
         # serialise the network as a string.
         self._network = network.saveToString()
 
-    def _calc_num_threads(self, df_size: int, query_size: int) -> int:
+    def _calc_num_threads(self, df_size: int, query_size: int, max_threads=None) -> int:
         num_queries = df_size * query_size
 
         if mp.cpu_count() == 1:
@@ -606,10 +611,13 @@ class BatchQuery:
         else:
             r = calc
 
+        if max_threads is not None and r > max_threads:
+            return max_threads
+
         return r
 
     def query(self, queries: List[QueryBase] = [QueryStatistics()], append_to_df=True,
-              variable_references: List[str] = []):
+              variable_references: List[str] = [], max_threads=None):
 
         if not hasattr(queries, "__getitem__"):
             queries = [queries]
@@ -618,7 +626,7 @@ class BatchQuery:
         logger = self._logger
         conn = self._datastore.get_connection()
         table = self._datastore.table
-        processes = self._calc_num_threads(len(self._datastore.data), len(queries))
+        processes = self._calc_num_threads(len(self._datastore.data), len(queries), max_threads=max_threads)
 
         self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
 
@@ -661,6 +669,30 @@ class TrainingResults:
     def get_model(self):
         return NetworkModel(self._network, self._logger)
 
+class Impute:
+    def __init__(self, network, logger):
+        self._network = network
+        self._logger = logger
+
+    def analyse(self, dataset):
+        model = NetworkModel(self._network, self._logger)
+
+        df = dataset.get_dataframe()
+
+        queries = []
+        for discrete in bayesianpy.network.get_discrete_variables(self._network):
+            if discrete.getName() in df.columns:
+                queries.append(QueryMostLikelyState(discrete.getName(), output_dtype=df[discrete.getName()].dtype, suffix=""))
+
+        for continuous in bayesianpy.network.get_continuous_variables(self._network):
+            if continuous.getName() in df.columns:
+                queries.append(QueryMeanVariance(continuous.getName(), result_mean_suffix=""))
+
+        result = model.batch_query(dataset, queries, append_to_df=False)
+
+        for col in result.columns:
+            nulls = pd.isnull(df[col])
+            df.iloc[nulls, col] = result.ix(nulls)
 
 class Sampling:
     def __init__(self, network):
@@ -683,7 +715,6 @@ class Sampling:
 
         return pd.DataFrame(results)
 
-
 class NetworkModel:
     def __init__(self, network, logger):
         self._jnetwork = network
@@ -703,26 +734,33 @@ class NetworkModel:
     def is_trained(self):
         return bayesianpy.network.is_trained(self._jnetwork)
 
-    def train(self, dataset: bayesianpy.data.DataSet) -> TrainingResults:
+    def train(self, dataset: bayesianpy.data.DataSet, seed:int=None, maximum_iterations:int=None)\
+            -> TrainingResults:
         """
         Train a model on data provided in the constructor
         """
+
         learning = bayesServerParams().ParameterLearning(self._jnetwork,
                                                          self._inference_factory.get_inference_factory())
         learning_options = bayesServerParams().ParameterLearningOptions()
 
+        if seed is not None:
+            learning_options.setSeed(seed)
+
+        if maximum_iterations is not None:
+            learning_options.setMaximumIterations(maximum_iterations)
+
         data_reader_command = dataset.create_data_reader_command()
 
         reader_options = dataset.get_reader_options()
-
         variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
         evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command,
                                                                                   jp.java.util.Arrays.asList(
                                                                                       variable_references),
                                                                                   reader_options)
-
         self._logger.info("Training model...")
+
         result = learning.learn(evidence_reader_command, learning_options)
         self._logger.info("Finished training model")
 
@@ -734,6 +772,10 @@ class NetworkModel:
                 'bic': result.getBIC().floatValue()}, self._logger)
 
     def batch_query(self, dataset: bayesianpy.data.DataSet, queries: List[QueryBase], append_to_df=True,
-                    variable_references: List[str] = []):
+                    variable_references: List[str] = [], max_threads=None):
         bq = BatchQuery(self._jnetwork, dataset, self._logger)
-        return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references)
+
+        variable_references = [ref for ref in variable_references if bayesianpy.network.variable_exists(self._jnetwork, ref)]
+
+        return bq.query(queries, append_to_df=append_to_df, variable_references=variable_references, max_threads=max_threads)
+
