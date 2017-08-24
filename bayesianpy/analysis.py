@@ -1,3 +1,4 @@
+from sklearn.model_selection import KFold as NewKFold, StratifiedKFold
 from sklearn.cross_validation import KFold
 import pandas as pd
 import bayesianpy.network
@@ -10,48 +11,59 @@ import os
 from sklearn.model_selection import train_test_split
 
 from sklearn.metrics import r2_score
+
+
 def continuous_score(x, y):
     return r2_score(x, y, multioutput='uniform_average')
 
+
 from sklearn.metrics import accuracy_score
+
+
 def discrete_score(x, y):
     return accuracy_score(x, y['MaxStateLikelihood'])
 
+
 from sklearn.metrics import confusion_matrix
+
+
 def fmeasure_score(predicted, actual, labels=None):
     return _fmeasure(*confusion_matrix(actual, predicted, labels=labels).flatten())
+
 
 def _fmeasure(tp, fp, fn, tn):
     """Computes effectiveness measures given a confusion matrix."""
     specificity = tn / (tn + fp)
     sensitivity = tp / (tp + fn)
     fmeasure = 2 * (specificity * sensitivity) / (specificity + sensitivity)
-    return { 'sensitivity': sensitivity, 'specificity': specificity, 'precision': tp / (tp + fp),
-        'fmeasure': fmeasure,
-             'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn,
-             'positive_likelihood_ratio': sensitivity / (1 - specificity),
-             'negative_likelihood_ratio': (1- sensitivity) / specificity}
+    return {'sensitivity': sensitivity, 'specificity': specificity, 'precision': tp / (tp + fp),
+            'fmeasure': fmeasure,
+            'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn,
+            'positive_likelihood_ratio': sensitivity / (1 - specificity),
+            'negative_likelihood_ratio': (1 - sensitivity) / specificity}
+
 
 def predictive_value(predicted, actual, labels=None):
     def _predictive_value(tp, fp, fn, tn):
         return {'positive_predictive_value': tp / (tp + fp),
-            'negative_predictive_value': tn/(tn + fn)}
+                'negative_predictive_value': tn / (tn + fn)}
 
     return _predictive_value(*confusion_matrix(predicted, actual, labels=labels).flatten())
 
+
 from bayesianpy.network import Builder as builder
 
-class DiscretisationAnalysis:
 
+class DiscretisationAnalysis:
     def __init__(self, logger, shuffle=True):
         self._shuffle = shuffle
         self._logger = logger
 
-    def analyse(self, df: pd.DataFrame, continuous_variable_names:List[str]):
+    def analyse(self, df: pd.DataFrame, continuous_variable_names: List[str]):
         kf = KFold(df.shape[0], n_folds=3, shuffle=self._shuffle)
 
         network_factory = bayesianpy.network.NetworkFactory(self._logger)
-        variations = [1,5,10,20,30]
+        variations = [1, 5, 10, 20, 30]
         results = {}
         with bayesianpy.data.DataSet(df, logger=self._logger) as dataset:
             ll = defaultdict(list)
@@ -61,7 +73,6 @@ class DiscretisationAnalysis:
                     weighted = []
                     weights = []
                     for k, (train_indexes, test_indexes) in enumerate(kf):
-
 
                         x_train, x_test = train_indexes, test_indexes
 
@@ -91,49 +102,11 @@ class DiscretisationAnalysis:
 
         return results
 
-class LogLikelihoodAnalysis:
+
+class CrossValidatedAnalysis:
     """
-    Used for comparing models, when looking for the minimum loglikelihood value for different configurations.
-    LogLikelihood cannot be used when models have a different number of variables, and can only be used between
-    configurations.
-    """
-
-    def __init__(self, logger, shuffle=True):
-        self._shuffle = shuffle
-        self._logger = logger
-
-    def analyse(self, df: pd.DataFrame, templates: Iterable[bayesianpy.template.Template], k=3, names: List[str] = None,
-                use_model_names=True):
-        kf = KFold(df.shape[0], n_folds=k, shuffle=self._shuffle)
-        db_folder = bayesianpy.utils.get_path_to_parent_dir(__file__)
-
-        network_factory = bayesianpy.network.NetworkFactory(self._logger)
-        with bayesianpy.data.DataSet(df, db_folder, self._logger) as dataset:
-            ll = defaultdict(list)
-            for k, (train_indexes, test_indexes) in enumerate(kf):
-                x_train, x_test = train_indexes, test_indexes
-
-                for i, tpl in enumerate(templates):
-
-                    n = type(tpl).__name__ if use_model_names else ""
-                    name = n if names is None else n + str(names[i])
-
-                    model = bayesianpy.model.NetworkModel(tpl.create(network_factory), self._logger)
-                    try:
-                        model.train(dataset.subset(x_train))
-                    except BaseException as e:
-                        self._logger.warning(e)
-                        continue
-
-                    results = model.batch_query(dataset.subset(x_test), [bayesianpy.model.QueryStatistics()], append_to_df=False)
-                    ll[name].extend(results.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
-
-        return pd.DataFrame(ll)
-
-class KFoldAnalysis:
-    """
-    Used for comparing models
-    """
+        Used for comparing models
+        """
 
     def __init__(self, logger, shuffle=True):
         self._shuffle = shuffle
@@ -143,30 +116,114 @@ class KFoldAnalysis:
     def get_models(self) -> List[bayesianpy.model.NetworkModel]:
         return self._models
 
-    def analyse(self, df: pd.DataFrame, tpl: bayesianpy.template.Template, dataset, queries, k=3, append_to_df=True):
-        if k > 1:
-            kf = KFold(df.shape[0], n_folds=k, shuffle=self._shuffle)
-        else:
-            self._logger.info("Not KFold anymore, just doing a train/test split.")
-            x_train, x_test = train_test_split(df, test_size=0.33)
-            kf = [(x_train.index, x_test.index)]
+    def _get_cv_splits(self, df) -> Iterable:
+        pass
 
+    def analyse(self, df: pd.DataFrame, templates: List[bayesianpy.template.Template], dataset, queries,
+                append_to_df=True, maximum_iterations=100):
         network_factory = bayesianpy.network.NetworkFactory(self._logger)
 
-        for k, (x_train, x_test) in enumerate(kf):
+        for k, (x_train, x_test) in enumerate(self._get_cv_splits(df)):
+            for tpl in templates:
+                nt = tpl.create(network_factory)
+                nt = bayesianpy.network.remove_single_state_nodes(nt)
+                model = bayesianpy.model.NetworkModel(nt, self._logger)
+                model.save('pretrained.bayes')
+                self._models.append(model)
+                try:
+                    model.train(dataset.subset(x_train.index), maximum_iterations=maximum_iterations)
+                except BaseException as e:
+                    self._logger.warning(e)
+                    continue
 
-            self._logger.info("Running KFold {} of {}".format(k, len(kf)))
-            model = bayesianpy.model.NetworkModel(tpl.create(network_factory), self._logger)
-            self._models.append(model)
-            try:
-                model.train(dataset.subset(x_train))
-            except BaseException as e:
-                self._logger.warning(e)
-                continue
+                model.save("trained.bayes")
+                yield model.batch_query(dataset.subset(x_test.index), queries,
+                                        append_to_df=append_to_df)
 
-            model.save("trained.bayes")
-            yield model.batch_query(dataset.subset(x_test), queries,
-                                      append_to_df=append_to_df)
+
+class KFoldAnalysis(CrossValidatedAnalysis):
+    """
+    Used for comparing models
+    """
+
+    def __init__(self, logger, shuffle=True, kfolds=3):
+        super().__init__(logger, shuffle)
+        self._kfolds = kfolds
+
+    def _get_cv_splits(self, df):
+        if self._cv_method is None:
+            self._cv_method = NewKFold(n_splits=self._kfolds, shuffle=self._shuffle)
+
+        for train, test in self._cv_method.split(df):
+            yield df.ix[train], df.ix[test]
+
+
+class StratifiedKFoldAnalysis(CrossValidatedAnalysis):
+    """
+    Used for comparing models
+    """
+
+    def __init__(self, logger, shuffle=True, kfolds=3, class_col: str = None):
+        super().__init__(logger, shuffle)
+        self._kfolds = kfolds
+        self._class_col = class_col
+
+    def _get_cv_splits(self, df):
+        if self._cv_method is None:
+            self._cv_method = StratifiedKFold(n_splits=self._kfolds, shuffle=self._shuffle)
+
+        for train, test in self._cv_method.split(df, df[self._class_col]):
+            yield df.ix[train], df.ix[test]
+
+
+class TrainTestSplitAnalysis(CrossValidatedAnalysis):
+    """
+    Used for comparing models
+    """
+
+    def __init__(self, logger, shuffle=True, kfolds=3):
+        super().__init__(logger, shuffle)
+        self._kfolds = kfolds
+
+    def _get_cv_splits(self, df):
+        self._logger.info("Not KFold anymore, just doing a train/test split.")
+        x_train, x_test = train_test_split(df, test_size=0.33)
+        return [(x_train, x_test)]
+
+class NoSplitAnalysis(CrossValidatedAnalysis):
+    """
+    Used for comparing models
+    """
+
+    def __init__(self, logger):
+        super().__init__(logger, False)
+
+    def _get_cv_splits(self, df):
+        self._logger.info("Testing and training on the same data")
+        return [(df, df)]
+
+
+class LogLikelihoodAnalysis:
+    """
+    Used for comparing models, when looking for the minimum loglikelihood value for different configurations.
+    LogLikelihood cannot be used when models have a different number of variables, and can only be used between
+    configurations.
+    """
+
+    def __init__(self, logger, split_strategy:CrossValidatedAnalysis):
+        self._logger = logger
+        self._split_strategy = split_strategy
+
+    def analyse(self, df: pd.DataFrame, templates: List[bayesianpy.template.Template], dataset, maximum_iterations=100):
+
+        ll = defaultdict(list)
+
+        for tpl in templates:
+            label = tpl.get_label()
+            for r in self._split_strategy.analyse(df, [tpl], dataset, [bayesianpy.model.QueryModelStatistics()], append_to_df=False):
+                ll[label].extend(r.loglikelihood.replace([np.inf, -np.inf], np.nan).tolist())
+
+        return pd.DataFrame(ll)
 
 # class RegressionAnalysis:
 #
