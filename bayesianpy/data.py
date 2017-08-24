@@ -44,14 +44,15 @@ class DataFrameReader:
     def index(self):
         return self._row[0]
 
-    def to_dict(self):
-        return self.row()
+    def to_dict(self, columns: List[str] = None):
+        return self.row(columns=columns)
 
     def tolist(self, cols) -> List[object]:
         return [self.__getitem__(c) for c in cols]
 
-    def row(self) -> Dict[str, object]:
-        return {c : self.__getitem__(c) for c in self._columns}
+    def row(self, columns: List[str] = None) -> Dict[str, object]:
+        cols = set(self._columns if columns is None else columns)
+        return {c : self.__getitem__(c) for c in self._columns if c in cols}
 
     def writer(self) -> 'DataFrameWriter':
         if self._row is not None:
@@ -65,7 +66,11 @@ class DataFrameReader:
     def __getitem__(self, key) -> object:
         # the df index of the row is at index 0
         try:
-            ix = self._columns.index(key) + 1
+            if type(key) is list:
+                print(key)
+                ix = [self._columns.index(key) + 1 for k in key]
+            else:
+                ix = self._columns.index(key) + 1
             return self._row[ix]
         except BaseException as e:
             return None
@@ -91,7 +96,6 @@ class DataFrameWriter:
         if not bayesianpy.data.DataFrame.is_int(self._df.index.dtype):
             raise IndexError("Index has to be of type int to use the Writer")
 
-
         if index not in self._row_indices:
             self._row_indices.add(index)
 
@@ -105,6 +109,11 @@ class DataFrameWriter:
                     column: np.empty((1, len(self._df)), dtype="object")
                 })
                 self._columns[column][:] = ""
+            elif isinstance(value, bool):
+                self._columns.update({
+                    column: np.empty((1, len(self._df)), dtype="bool")
+                })
+                self._columns[column][:] = False
             else:
                 self._columns.update({
                     column: np.empty((1, len(self._df)))
@@ -127,11 +136,6 @@ class DataFrameWriter:
             return self._df.join(df1)
         else:
             return df.join(df1)
-
-
-
-
-
 
 
 class AutoType:
@@ -415,7 +419,7 @@ class DataSet:
         return create_engine(filename)
 
     def subset(self, indices:List[int]) -> 'DataSet':
-        return DataSet(self.data.loc[indices], self._db_dir, self._logger, identifier=self.uuid)
+        return DataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
 
     def get_reader_options(self):
         return bayesServer().data.ReaderOptions("ix") if self._weight_column is None \
@@ -431,25 +435,19 @@ class DataSet:
         if not os.path.exists(os.path.join(self._db_dir, "db")):
             os.makedirs(os.path.join(self._db_dir, "db"))
 
-    def write(self):
+    def write(self, if_exists:str=None):
         self._logger.info("Writing rows to storage")
-        dk.to_sql(self.data, self.table, self._engine)
+        dk.to_sql(self.data, self.table, self._engine, if_exists=if_exists)
         self._logger.info("Finished writing rows to storage")
 
-
-
-
-    def create_data_reader_command(self, indexes=[]):
+    def create_data_reader_command(self):
         """
         Get the data reader
         :param indexes: training/ testing indexes
         :return: a a DatabaseDataReaderCommand
         """
 
-        if len(indexes) > 0:
-            query = "select * from {} where ix in ({}) order by ix asc".format(self.table, ",".join(str(i) for i in indexes))
-        else:
-            query = "select * from {} order by ix asc".format(self.table)
+        query = "select * from {} where ix in ({}) order by ix asc".format(self.table, ",".join(str(i) for i in self.data.index))
 
         data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
             self.get_connection(),
