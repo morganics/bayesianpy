@@ -19,9 +19,16 @@ def _get_df_partitions(df) -> Iterable[pd.DataFrame]:
 def _is_pandas(df):
     return isinstance(df, pd.DataFrame)
 
-def to_sql(df, table, engine, index_label='ix', index=True):
+def to_sql(df, table, engine, index_label='ix', index=True, if_exists=None):
     if hasattr(df, 'to_sql'):
-        df.to_sql(table, engine, if_exists='replace', index_label=index_label, index=index)
+        mode = 'replace'
+        if if_exists is not None:
+            mode = if_exists
+        #a = "replace" if_exists is not None else if_exists
+        df.to_sql(table, engine, if_exists=mode, index_label=index_label, index=index)
     else:
+        mode = 'append'
+        if if_exists is not None:
+            mode = if_exists
         for partition in _get_df_partitions(df):
-            partition.to_sql(table, engine, if_exists='append', index_label=index_label, index=index)
+            partition.to_sql(table, engine, if_exists=mode, index_label=index_label, index=index)
