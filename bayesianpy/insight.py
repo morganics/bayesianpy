@@ -66,7 +66,8 @@ class _AutoInsight:
 class AutoInsight:
     def __init__(self, network_factory: bayesianpy.network.NetworkFactory, template: bayesianpy.template.Template,
                  dataset: bayesianpy.data.DataSet,
-                 target: bayesianpy.network.Discrete, logger: logging.Logger, comparison_models=3):
+                 target: bayesianpy.network.Discrete, logger: logging.Logger, comparison_models=3,
+                 maximum_iterations=100):
 
         self._network_template = template
         self._logger = logger
@@ -75,6 +76,7 @@ class AutoInsight:
         self._model_cache = []
         self._comparison_model_count = comparison_models
         self._target = target
+        self._max_iterations = maximum_iterations
 
     def get_models(self):
         return self._create_models()
@@ -86,7 +88,8 @@ class AutoInsight:
         for i in range(self._comparison_model_count):
             network = self._network_template.create(self._network_factory)
             model = bayesianpy.model.NetworkModel(network, self._logger)
-            model.train(self._dataset)
+            model.train(self._dataset, maximum_iterations=self._max_iterations)
+            model.save("insight.bayes")
             self._model_cache.append(_AutoInsight(network, self._target, self._logger))
 
         return self._model_cache
