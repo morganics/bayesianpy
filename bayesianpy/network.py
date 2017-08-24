@@ -143,7 +143,7 @@ class Builder:
                                     infinite_extremes=True,
                                     decimal_places=4,
                                     mode='EqualFrequencies',
-                                    bins=[]):
+                                    bins=[], zero_crossing=False):
         if len(bins) == 0:
             options = bayesServerDiscovery().DiscretizationOptions()
             options.setInfiniteExtremes(infinite_extremes)
@@ -157,6 +157,20 @@ class Builder:
                 raise ValueError("mode not recognised")
 
             intervals = ef.discretize(values, options, jp.JString(node_name))
+            if zero_crossing:
+                end_point_value = 0.5
+                intervals = list(intervals.toArray())
+                zero = bayesServer().Interval(jp.java.lang.Double(jp.java.lang.Double.NEGATIVE_INFINITY), jp.java.lang.Double(end_point_value), bayesServer().IntervalEndPoint.CLOSED,
+                                              bayesServer().IntervalEndPoint.OPEN)
+
+                # if the interval starts and ends at end_point_value then remove it
+                if intervals[0].getMaximum() == end_point_value:
+                    intervals.pop(0)
+                else:
+                    intervals[0].setMinimum(jp.java.lang.Double(0.5))
+                    intervals[0].setMinimumEndPoint(bayesServer().IntervalEndPoint.CLOSED)
+
+                intervals = [zero] + intervals
         else:
             intervals = []
             for bin in bins:
