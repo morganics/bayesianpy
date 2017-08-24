@@ -6,12 +6,16 @@ import bayesianpy.dask as dk
 import logging
 
 class Template:
-    def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame()):
+    def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame(), label:str=None):
         self._discrete = discrete
         self._continuous = continuous
+        self._label = label
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         return network_factory.create()
+
+    def get_label(self):
+        return self._label
 
 
 class Tpl(Template):
@@ -119,17 +123,20 @@ class WithoutEdges(Template):
             for d_name in self._discrete.columns:
                 builder.create_discrete_variable(network, self._discrete, d_name, blanks=self._blanks)
 
+        network = bayesianpy.network.remove_single_state_nodes(network)
+
         return network
 
 class DiscretisedMixtureNaiveBayes(Template):
 
     def __init__(self, logger, discrete=pd.DataFrame(), continuous=pd.DataFrame(), latent_states=10, bin_count=4,
-                 binning_mode='EqualFrequencies'):
+                 binning_mode='EqualFrequencies', zero_crossing=False):
         super().__init__(discrete=discrete, continuous=continuous)
         self._latent_states = latent_states
         self._logger = logger
         self._bin_count = bin_count
         self._binning_mode = binning_mode
+        self._zero_crossing = zero_crossing
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = network_factory.create()
@@ -138,7 +145,7 @@ class DiscretisedMixtureNaiveBayes(Template):
         if not self._continuous.empty:
             for c_name in self._continuous.columns:
                 c = builder.create_discretised_variable(network, self._continuous, c_name, bin_count=self._bin_count,
-                                                        mode=self._binning_mode)
+                                                        mode=self._binning_mode, zero_crossing=self._zero_crossing)
 
                 builder.create_link(network, cluster, c)
 
@@ -189,6 +196,67 @@ class AutoStructure(Template):
                                                                          jp.java.util.Arrays.asList(
                                                                              network.getNodes().toArray()),
                                                                                 options)
+        elif self._engine == 'Hierarchical':
+
+            from sklearn.model_selection import KFold
+            class DefaultEvidenceReaderCommandFactory:
+                def __init__(self, ds:bayesianpy.data.DataSet, options):
+                    #self._data_reader_command = cmd
+                    self._ds = ds
+                    #self._variable_references = refs
+                    self._reader_options = options
+                    self._kfold = None
+                    self._partitions = {}
+
+                def create(self, network):
+                    variable_references = list(
+                        bayesianpy.network.create_variable_references(network, self._ds.get_dataframe()))
+
+                    return bayesServer().data.DefaultEvidenceReaderCommand(self._ds.create_data_reader_command(),
+                                                                           jp.java.util.Arrays.asList(variable_references),
+                                                                           self._reader_options)
+
+                def createPartitioned(self, network,
+                                      dataPartitioning,
+                                      partitionCount):
+
+                    if self._kfold is None:
+                        self._kfold = KFold(n_splits=partitionCount, shuffle=False)
+
+                    variable_references = list(
+                        bayesianpy.network.create_variable_references(network, self._ds.get_dataframe()))
+
+                    if dataPartitioning.getPartitionNumber() in self._partitions:
+                        train, test = self._partitions[dataPartitioning.getPartitionNumber()]
+                    else:
+                        train, test = next(self._kfold.split(self._ds.data))
+                        #train = train.index.tolist()
+                        #test = test.index.tolist()
+                        self._partitions.update({ dataPartitioning.getPartitionNumber() :
+                                                      (train, test)})
+
+                    if dataPartitioning.getMethod() == bayesServer().data.DataPartitionMethod.EXCLUDE_PARTITION_DATA:
+                        print("Excluding")
+                        subset = self._ds.subset(train)
+                    else:
+                        print("Including")
+                        subset = self._ds.subset(test)
+
+                    cmd = subset.create_data_reader_command()
+                    return bayesServer().data.DefaultEvidenceReaderCommand(cmd,
+                                                                           jp.java.util.Arrays.asList(
+                                                                               variable_references),
+                                                                           self._reader_options)
+
+            ercf = DefaultEvidenceReaderCommandFactory(self._dataset, reader_options)
+            proxy = jp.JProxy("com.bayesserver.data.EvidenceReaderCommandFactory", inst=ercf)
+
+            options = bayesServerStructure().HierarchicalStructuralLearningOptions()
+            self._logger.info("Learning structure from {} variables.".format(len(variable_references)))
+            output = bayesServerStructure().HierarchicalStructuralLearning().learn(proxy,
+                                                                         jp.java.util.Arrays.asList(
+                                                                             network.getNodes().toArray()),
+                                                                                options)
 
         self._logger.info("Created {} links.".format(len(output.getLinkOutputs())))
 
@@ -210,9 +278,12 @@ class AutoStructure(Template):
         return network
 
 from typing import List
+
+
+
 class WithDiscretisedVariables(Template):
     def __init__(self, template: Template, logger, discretised_variables:List[str]=None, bins:List[int]=None,
-                 mode='EqualFrequencies', default_bin_count:int=4):
+                 mode='EqualFrequencies', default_bin_count:int=4, zero_crossing=False):
 
         super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
@@ -221,6 +292,7 @@ class WithDiscretisedVariables(Template):
         self._bins = bins
         self._mode = mode
         self._default_bin_count = default_bin_count
+        self._zero_crossing = zero_crossing
 
         if discretised_variables is None:
             self._discretised_variables = template._continuous
@@ -239,7 +311,7 @@ class WithDiscretisedVariables(Template):
             bin_count = self._default_bin_count if self._bins is None else self._bins[i]
 
             n = builder.create_discretised_variable(network, self._continuous, var,
-                                                    bin_count=bin_count, mode=self._mode)
+                                                    bin_count=bin_count, mode=self._mode, zero_crossing=self._zero_crossing)
 
             if node is not None:
                 for l in links_from:
@@ -272,8 +344,8 @@ class With0Nodes(Template):
 
 class WithLatentNode(Template):
 
-    def __init__(self, template, logger, latent_states=5, target_node:str=None):
-        super().__init__(discrete=template._discrete, continuous=template._continuous)
+    def __init__(self, template, logger, latent_states=5, target_node:str=None, label:str=None):
+        super().__init__(discrete=template._discrete, continuous=template._continuous, label=label)
         self._template = template
         self._latent_states = latent_states
         self._logger = logger
@@ -290,8 +362,8 @@ class WithLatentNode(Template):
             builder.create_link(network, cluster, node)
 
         if self._target_node is not None:
-            node = builder.get_node(network, self._target_node)
-            builder.delete_links_from(network, node)
+            target = builder.get_node(network, self._target_node)
+            builder.delete_links_from(network, target)
 
         return network
 
