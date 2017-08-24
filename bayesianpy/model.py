@@ -99,7 +99,7 @@ class Query:
             results.append(query.results(self._inference_engine, self._query_output))
 
         if clear_evidence:
-            self._inference_engine.getEvidence().clear()
+            evidence.clear()
 
         if len(queries) == 1 and not aslist:
             return results[0]
@@ -137,26 +137,27 @@ class Evidence:
         self._evidence.clear()
         self._variables = network.getVariables()
 
-    def apply(self, evidence: Dict[str, object]):
+    def apply(self, evidence: Dict[str, object]=None):
         """
         Apply evidence to a network
         :param evidence: a dict of
         :return: the evidence object to apply to the query
         """
-        for key, value in evidence.items():
-            v = self._variables.get(key)
-            if bayesianpy.network.is_variable_discrete(v):
-                if v is None:
-                    raise ValueError("Node {} does not exist".format(key))
+        if evidence is not None:
+            for key, value in evidence.items():
+                v = self._variables.get(key)
+                if bayesianpy.network.is_variable_discrete(v):
+                    if v is None:
+                        raise ValueError("Node {} does not exist".format(key))
 
-                st = v.getStates().get(value)
-                if st is None:
-                    raise ValueError("State {} does not exist in variable {}".format(value, key))
+                    st = v.getStates().get(value)
+                    if st is None:
+                        raise ValueError("State {} does not exist in variable {}".format(value, key))
 
-                self._evidence.setState(st)
+                    self._evidence.setState(st)
 
-            elif bayesianpy.network.is_variable_continuous(v):
-                self._evidence.set(v, jp.java.lang.Double(float(value)))
+                elif bayesianpy.network.is_variable_continuous(v):
+                    self._evidence.set(v, jp.java.lang.Double(float(value)))
 
 
         return self._evidence
@@ -521,7 +522,7 @@ class QueryMeanVariance(QueryBase):
         return "P({})".format(self._variable_name)
 
 
-def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_name: str,
+def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, table_name: str,
                  variable_references: List[str],
                  queries, logger, i):
     try:
@@ -531,7 +532,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
             "select * from {} where ix in ({})".format(table_name,
                                                        ",".join(str(i) for i in dk.compute(df.index).tolist()))).executeReader()
 
-        network = bayesianpy.network.create_network_from_string(network)
+        network = bayesianpy.network.create_network_from_string(network_string)
         reader_options = bayesServer().data.ReaderOptions("ix")
         variable_refs = list(bayesianpy.network.create_variable_references(network, df,
                                                                            variable_references=variable_references))
@@ -539,15 +540,19 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
         reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
                                                           reader_options)
 
-        factory = InferenceEngine(network)
-        (inference_engine, query_options, query_output) = factory.create()
+        inference_engine = InferenceEngine(network).create_engine()
+        query_options = InferenceEngine.get_inference_factory().createQueryOptions()
+        query_output = InferenceEngine.get_inference_factory().createQueryOutput()
 
         for query in queries:
             query.setup(network, inference_engine, query_options)
 
+        ev = Evidence(network, inference_engine).apply()
+
         results = []
+
         try:
-            while reader.read(inference_engine.getEvidence(), bayesServer().data.DefaultReadOptions(True)):
+            while reader.read(ev, bayesServer().data.DefaultReadOptions(True)):
                 result = {}
 
                 try:
@@ -560,7 +565,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
                 for query in queries:
                     result = {**result, **query.results(inference_engine, query_output)}
 
-                inference_engine.getEvidence().clear()
+                ev.clear()
                 result.update({'caseid': int(reader.getReadInfo().getCaseId().toString())})
 
                 results.append(result)
@@ -586,11 +591,13 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network: str, table_n
 
 class BatchQuery:
     def __init__(self, network, datastore, logger: logging.Logger):
-
         self._logger = logger
         self._datastore = datastore
         # serialise the network as a string.
-        self._network = network.saveToString()
+        from xml.dom import minidom
+        nt = network.saveToString()
+        reparsed = minidom.parseString(nt)
+        self._network = reparsed.toprettyxml(indent="  ")
 
     def _calc_num_threads(self, df_size: int, query_size: int, max_threads=None) -> int:
         num_queries = df_size * query_size
@@ -745,7 +752,7 @@ class NetworkModel:
         learning_options = bayesServerParams().ParameterLearningOptions()
 
         if seed is not None:
-            learning_options.setSeed(seed)
+            learning_options.setSeed(int(seed))
 
         if maximum_iterations is not None:
             learning_options.setMaximumIterations(maximum_iterations)

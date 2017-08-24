@@ -3,7 +3,7 @@ import os
 import bayesianpy.utils
 import platform
 
-BAYES_SERVER_VERSION = "7.18"
+BAYES_SERVER_VERSION = "7.24"
 
 def attach_thread(logger=None):
     if not jp.isThreadAttachedToJVM():
