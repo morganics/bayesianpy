@@ -194,6 +194,10 @@ class DataFrame:
         return False
 
     @staticmethod
+    def get_boolean_columns(df):
+        return [col for col in df.columns if DataFrame.is_bool(df[col].dtype)]
+
+    @staticmethod
     def is_numeric(dtype):
         return DataFrame.is_float(dtype) or DataFrame.is_int(dtype)
 
@@ -385,41 +389,44 @@ def create_histogram(series):
 
     return bayesServerAnalysis().HistogramDensity.learn(jp.java.util.Arrays.asList(values), hdo)
 
+def _to_java_class(data_type):
+    """
+    Converts numpy data type to equivalent Java class
+    :param data_type: the numpy data type
+    :return: The Java Class
+    """
+    if data_type == np.int32:
+        return jp.java.lang.Integer(0).getClass()  # .class not currently supported by jpype
+    if data_type == np.int64:
+        return jp.java.lang.Long(0).getClass()  # .class not currently supported by jpype
+    if data_type == np.float32:
+        return jp.java.lang.Float(0).getClass()  # .class not currently supported by jpype
+    if data_type == np.float64:
+        return jp.java.lang.Double(0.0).getClass()  # .class not currently supported by jpype
+    if data_type == np.bool:
+        return jp.java.lang.Boolean(False).getClass()  # .class not currently supported by jpype
+    if data_type == np.object:
+        return jp.java.lang.String().getClass()  # .class not currently supported by jpype
+
+    raise ValueError('dtype [{}] not currently supported'.format(data_type))
+
+
 class DataSet:
-    def __init__(self, df: pd.DataFrame, db_folder:str=None, logger: logging.Logger=None,
+    def __init__(self, df: pd.DataFrame, logger: logging.Logger=None,
                  identifier: str=None, weight_column: str=None,
-                 storage_engine=None
                  ):
+
         if identifier is None:
             self.uuid = str(uuid.uuid4()).replace("-","")
         else:
             self.uuid = identifier
 
-        if storage_engine is None:
-            self._db_dir = db_folder if db_folder is not None \
-                else bayesianpy.utils.get_path_to_parent_dir(os.path.basename(os.getcwd()))
-
-            self._create_folder()
-
-            storage_engine = self._create_sqlite_engine()
-
-        self._engine = storage_engine
-        self.table = "table_" + self.uuid
         self._logger = logger if logger is not None else logging.getLogger()
         self.data = df
         self._weight_column = weight_column
 
-    @staticmethod
-    def create_mysql_engine(username, password, server, database):
-        return create_engine('mysql://{}:{}@{}/{}'.format(username, password, server, database
-                                                ))
-
-    def _create_sqlite_engine(self):
-        filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
-        return create_engine(filename)
-
     def subset(self, indices:List[int]) -> 'DataSet':
-        return DataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
+        return DataSet(self.data.iloc[indices], self._logger, identifier=self.uuid)
 
     def get_reader_options(self):
         return bayesServer().data.ReaderOptions("ix") if self._weight_column is None \
@@ -428,17 +435,46 @@ class DataSet:
     def get_dataframe(self) -> pd.DataFrame:
         return self.data
 
-    def get_connection(self):
-        return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
+    def write(self, if_exists:str=None):
+        pass
 
-    def _create_folder(self):
-        if not os.path.exists(os.path.join(self._db_dir, "db")):
-            os.makedirs(os.path.join(self._db_dir, "db"))
+    def create_data_reader_command(self):
+        pass
+
+    def cleanup(self):
+        pass
+
+    def __enter__(self):
+        self.write()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.cleanup()
+
+class DataTableDataSet(DataSet):
+
+    ''' Not very good for large datasets '''
+    def __init__(self, df: pd.DataFrame, logger: logging.Logger=None,
+                 identifier: str=None, weight_column: str=None,
+                 ):
+        super().__init__(df, logger, identifier, weight_column)
 
     def write(self, if_exists:str=None):
-        self._logger.info("Writing rows to storage")
-        dk.to_sql(self.data, self.table, self._engine, if_exists=if_exists)
-        self._logger.info("Finished writing rows to storage")
+        bayes = jp.JPackage("com.bayesserver")
+        bayes_data = bayes.data
+
+        data_table = bayes_data.DataTable()
+        cols = data_table.getColumns()
+
+        for name, data_type in self.data.dtypes.iteritems():
+            java_class = _to_java_class(data_type)
+            data_column = bayes_data.DataColumn(name, java_class)
+            cols.add(data_column)
+
+        for index, row in self.data.iterrows():
+            data_table.getRows().add(row)
+
+        self._data_table = data_table
 
     def create_data_reader_command(self):
         """
@@ -446,7 +482,26 @@ class DataSet:
         :param indexes: training/ testing indexes
         :return: a a DatabaseDataReaderCommand
         """
+        data_reader_command = bayesServer().data.DataTableDataReaderCommand(self._data_table)
 
+        return data_reader_command
+
+
+class SqlDataSet(DataSet):
+    def __init__(self, df: pd.DataFrame, logger:logging.Logger=None, identifier=None, weight_column=None):
+        super().__init__(df, logger, identifier=identifier, weight_column=weight_column)
+        self._engine = None
+        self.table = "table_" + self.uuid
+
+    def get_connection(self):
+        pass
+
+    def create_data_reader_command(self):
+        """
+        Get the data reader
+        :param indexes: training/ testing indexes
+        :return: a a DatabaseDataReaderCommand
+        """
         query = "select * from {} where ix in ({}) order by ix asc".format(self.table, ",".join(str(i) for i in self.data.index))
 
         data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
@@ -455,6 +510,160 @@ class DataSet:
 
         return data_reader_command
 
+    def write(self, if_exists:str=None):
+        self._logger.info("Writing rows to storage")
+        dk.to_sql(self.data, self.table, self._engine, if_exists=if_exists)
+        self._logger.info("Finished writing rows to storage")
+
+class ExcelDataSet(DataSet):
+    def __init__(self, df: pd.DataFrame, db_folder:str=None, logger:logging.Logger=None, identifier=None, weight_column=None):
+        super().__init__(df, logger, identifier=identifier, weight_column=weight_column)
+        self._engine = None
+        self.table = "table_" + self.uuid
+
+        self._db_dir = db_folder if db_folder is not None \
+            else bayesianpy.utils.get_path_to_parent_dir(os.path.basename(os.getcwd()))
+
+        self._create_folder()
+
+    def get_connection(self):
+        return \
+            "jdbc:odbc:Driver={{Microsoft Excel Driver(*.xlsx)}};" \
+                "DBQ={}.xlsx".format(os.path.join(self._db_dir, self.table))
+
+    def _create_folder(self):
+        if not os.path.exists(os.path.join(self._db_dir, "db")):
+            os.makedirs(os.path.join(self._db_dir, "db"))
+
+    def create_data_reader_command(self):
+        """
+        Get the data reader
+        :param indexes: training/ testing indexes
+        :return: a a DatabaseDataReaderCommand
+        """
+        query = "select * from [Sheet1$] where ix in ({}) order by ix asc".format(self.table, ",".join(str(i) for i in self.data.index))
+
+        data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
+            self._get_connection(),
+            query)
+
+        return data_reader_command
+
+    def write(self, if_exists:str=None):
+        #from pyexcelerate import Workbook
+        self._logger.info("Writing rows to storage")
+        #wb = Workbook()
+        #wb.new_sheet("Sheet1", data=self.data)
+        #wb.save("{}.xlsx".format(os.path.join(self._db_dir, self.table)))
+        writer = pd.ExcelWriter("{}.xlsx".format(os.path.join(self._db_dir, self.table))
+                                , engine='xlsxwriter')
+        self.data.to_excel(writer)
+        writer.save()
+        self._logger.info("Finished writing rows to storage")
+
+
+class MysqlDataSet(SqlDataSet):
+    ''' Good for larger datasets '''
+    def __init__(self, df: pd.DataFrame, username:str, password:str, server:str,
+                 logger: logging.Logger = None, identifier=None):
+        super().__init__(df, logger, identifier=identifier)
+        self._engine = self._create_mysql_engine(username, password, server, self.uuid)
+        self._server = server
+        self._username = username
+        self._password = password
+
+    def _create_mysql_engine(self, username, password, server, database):
+        return create_engine('mysql://{}:{}@{}/{}'.format(username, password, server, database))
+
+    def get_connection(self):
+        return "jdbc:mysql://{}:{}@{}/{}".format(self._username, self._password, self._server, self.uuid)
+
+
+
+    def subset(self, indices:List[int]) -> 'DataSet':
+        return MysqlDataSet(self.data.iloc[indices], self._username, self._password,
+                            self._server, identifier=self.uuid)
+
+    def write(self, if_exists:str=None):
+        jp.java.lang.Class.forName("com.mysql.jdbc.Driver",
+                                   True, jp.java.lang.ClassLoader.getSystemClassLoader())
+        from sqlalchemy_utils import database_exists, create_database
+        if not database_exists(self._engine.url):
+             create_database(self._engine.url)
+
+        super().write(if_exists=if_exists)
+
+class FirebirdDataSet(SqlDataSet):
+    ''' Good for larger datasets '''
+    def __init__(self, df: pd.DataFrame, username:str, password:str, server:str,
+                 logger: logging.Logger = None, identifier=None, page_size:int=16384):
+        if identifier is None:
+            import time
+            identifier = str(int(time.time()))
+
+        super().__init__(df, logger, identifier=identifier)
+        self._engine = self._create_firebird_engine(username, password, server, self.uuid)
+        self._server = server
+        self._username = username
+        self._password = password
+        self._pagesize = page_size
+
+    def _dsn(self, username, password, server, database):
+        return "{}:{}@{}:3050/{}".format(username, password, server, database)
+
+    def _create_firebird_engine(self, username, password, server, database):
+        import fdb
+        return create_engine('firebird+fdb://{}'.format(self._dsn(username, password, server, database)))
+
+    def get_connection(self):
+        return "jdbc:firebirdsql://{}:3050/{}?userName={}&password={}&sqlDialect=3".format(self._server, self.uuid, self._username, self._password)
+
+    def subset(self, indices:List[int]) -> 'DataSet':
+        return FirebirdDataSet(self.data.iloc[indices], self._username, self._password,
+                            self._server, identifier=self.uuid)
+
+    def write(self, if_exists:str=None):
+
+        def _create_database():
+            return self._engine.dialect.dbapi.create_database(
+                user=self._username, password=self._password, host=self._server, database=self.uuid,
+                                                       page_size=self._pagesize
+                                                       )
+
+        from sqlalchemy_utils import database_exists
+        from sqlalchemy import exc as dbexceptions
+        try:
+            if not database_exists(self._engine.url):
+                a = _create_database()
+        except dbexceptions.DatabaseError:
+            a = _create_database()
+
+        super().write(if_exists=if_exists)
+
+class DefaultDataSet(SqlDataSet):
+
+    def __init__(self, df: pd.DataFrame, db_folder:str=None, logger:logging.Logger=None, identifier=None):
+
+        super().__init__(df, logger, identifier)
+
+        self._db_dir = db_folder if db_folder is not None \
+            else bayesianpy.utils.get_path_to_parent_dir(os.path.basename(os.getcwd()))
+
+        self._create_folder()
+
+        self._engine = self._create_sqlite_engine()
+
+    def get_connection(self):
+        return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
+
+    def _create_sqlite_engine(self):
+        filename = "sqlite:///{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
+        return create_engine(filename)
+
+    def _create_folder(self):
+        if not os.path.exists(os.path.join(self._db_dir, "db")):
+            os.makedirs(os.path.join(self._db_dir, "db"))
+
     def cleanup(self):
         self._logger.debug("Cleaning up: deleting db folder")
         try:
@@ -462,12 +671,10 @@ class DataSet:
         except:
             self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
 
-    def __enter__(self):
-        self.write()
-        return self
+    def subset(self, indices:List[int]) -> 'DataSet':
+        return DefaultDataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
 
-    def __exit__(self, type, value, traceback):
-        self.cleanup()
+
 
 def as_probability(series, output_column='cdf'):
     hist = create_histogram(series)
