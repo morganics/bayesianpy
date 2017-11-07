@@ -279,6 +279,23 @@ class AutoStructure(Template):
 
 from typing import List
 
+class WithTreeStructure(Template):
+    def __init__(self, template: Template, root_node:str):
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
+        self._template = template
+        self._root_node = root_node
+
+    def create(self, network_factory: bayesianpy.network.NetworkFactory):
+        network = self._template.create(network_factory)
+
+        root = bayesianpy.network.get_node(network, self._root_node)
+
+        for node in bayesianpy.network.get_nodes(network):
+            if node == root:
+                continue
+            builder.create_link(network, root, node)
+
+        return network
 
 
 class WithDiscretisedVariables(Template):
@@ -341,15 +358,51 @@ class With0Nodes(Template):
                 builder.create_link(network, n, node)
         return network
 
+from typing import Tuple
+class MoveNode(Template):
+
+    def __init__(self, template, target_node:str, delete_all_links=True, parents:List[str]=None, children:List[str]=None):
+        self._template = template
+        super().__init__(discrete=template._discrete, continuous=template._continuous)
+        self._target_node = target_node
+        self._delete_all_links = delete_all_links
+        self._parents = parents
+        self._children = children
+
+
+    def create(self, network_factory: bayesianpy.network.NetworkFactory):
+        network = self._template.create(network_factory)
+
+        node = bayesianpy.network.get_node(network, self._target_node)
+
+        if node is None:
+            raise ValueError("Node {} does not exist in network".format(self._target_node))
+
+        if self._delete_all_links:
+            builder.delete_links_from(network, node)
+            builder.delete_links_to(network, node)
+
+        for link in self._parents:
+            builder.create_link(network, link, node)
+
+        for link in self._children:
+            builder.create_link(network, node, link)
+
+        return network
 
 class WithLatentNode(Template):
 
-    def __init__(self, template, logger, latent_states=5, target_node:str=None, label:str=None):
+    def __init__(self, template, logger, latent_states=5, target_nodes=None, label:str=None, remove_target_node=False):
         super().__init__(discrete=template._discrete, continuous=template._continuous, label=label)
         self._template = template
         self._latent_states = latent_states
         self._logger = logger
-        self._target_node = target_node
+
+        if not isinstance(target_nodes, list) and target_nodes is not None:
+            target_nodes = [target_nodes]
+
+        self._target_nodes = target_nodes
+        self._remove_target_node = remove_target_node
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = self._template.create(network_factory)
@@ -361,9 +414,13 @@ class WithLatentNode(Template):
                 continue
             builder.create_link(network, cluster, node)
 
-        if self._target_node is not None:
-            target = builder.get_node(network, self._target_node)
-            builder.delete_links_from(network, target)
+        if self._target_nodes is not None:
+            for target_node in self._target_nodes:
+                target = builder.get_node(network, target_node)
+                builder.delete_links_from(network, target)
+
+                if self._remove_target_node:
+                    bayesianpy.network.remove_node(network, self._target_nodes)
 
         return network
 
