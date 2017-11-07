@@ -105,6 +105,16 @@ class Builder:
             network.getLinks().remove(link)
 
     @staticmethod
+    def delete_links_to(network, node):
+        if isinstance(node, str):
+            node = Builder.get_node(network, node)
+
+        for link in list(node.getLinksIn()):
+            network.getLinks().remove(link)
+
+
+
+    @staticmethod
     def create_link(network, n1, n2, t=None):
         if isinstance(n1, str):
             n1_name = n1
@@ -163,14 +173,15 @@ class Builder:
                 zero = bayesServer().Interval(jp.java.lang.Double(jp.java.lang.Double.NEGATIVE_INFINITY), jp.java.lang.Double(end_point_value), bayesServer().IntervalEndPoint.CLOSED,
                                               bayesServer().IntervalEndPoint.OPEN)
 
-                # if the interval starts and ends at end_point_value then remove it
-                if intervals[0].getMaximum() == end_point_value:
-                    intervals.pop(0)
-                else:
-                    intervals[0].setMinimum(jp.java.lang.Double(0.5))
-                    intervals[0].setMinimumEndPoint(bayesServer().IntervalEndPoint.CLOSED)
+                if 0.5 < intervals[0].getMaximum().floatValue():
+                    # if the interval starts and ends at end_point_value then remove it
+                    if intervals[0].getMaximum() == end_point_value:
+                        intervals.pop(0)
+                    else:
+                        intervals[0].setMinimum(jp.java.lang.Double(0.5))
+                        intervals[0].setMinimumEndPoint(bayesServer().IntervalEndPoint.CLOSED)
 
-                intervals = [zero] + intervals
+                    intervals = [zero] + intervals
         else:
             intervals = []
             for bin in bins:
@@ -229,7 +240,7 @@ class Builder:
             if blanks is not None:
                 states = df[node_name].replace(np.nan, blanks).unique()
             else:
-                states = df[node_name].dropna().unique()
+                states = df[node_name].replace("", np.nan).dropna().unique()
 
         for s in states:
             v.getStates().add(bayesServer().State(str(s)))
