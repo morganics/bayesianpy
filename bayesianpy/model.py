@@ -98,7 +98,7 @@ class Query:
         for query in queries:
             results.append(query.results(self._inference_engine, self._query_output))
 
-        if clear_evidence:
+        if clear_evidence and evidence is not None:
             evidence.clear()
 
         if len(queries) == 1 and not aslist:
@@ -146,6 +146,9 @@ class Evidence:
         if evidence is not None:
             for key, value in evidence.items():
                 v = self._variables.get(key)
+                if v is None:
+                    raise ValueError("The variable {} is not present in the network".format(v))
+
                 if bayesianpy.network.is_variable_discrete(v):
                     if v is None:
                         raise ValueError("Node {} does not exist".format(key))
@@ -424,6 +427,9 @@ class QueryStateProbability(QueryMostLikelyState):
                 states.update({self._target_variable_name + self._variable_state_separator + state.getName()
                            + self._suffix: p})
 
+        if len(states) == 0:
+            raise ValueError("QueryStateProbability: the target state name did not match any variables")
+
         return states
 
 
@@ -527,6 +533,8 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, 
                  queries, logger, i):
     try:
         bayesianpy.jni.attach(logger, heap_space='1g')
+
+        #TODO: abstract this back to the dataset object
         data_reader = bayesServer().data.DatabaseDataReaderCommand(
             connection_string,
             "select * from {} where ix in ({})".format(table_name,
@@ -706,9 +714,11 @@ class Sampling:
         self._network = network
         self._sampling = bayesianpy.jni.bayesServerSampling().DataSampler(self._network)
 
-    def sample(self, num_samples: int=1):
+    def sample(self, num_samples: int=1, evidence:Evidence=None):
         rand = jp.java.util.Random()
-        evidence = bayesianpy.jni.bayesServerInference().DefaultEvidence(self._network)
+        if evidence is None:
+            evidence = bayesianpy.jni.bayesServerInference().DefaultEvidence(self._network)
+
         options = bayesianpy.jni.bayesServerSampling().DataSamplingOptions()
         results = []
         for i in range(num_samples):
@@ -716,7 +726,14 @@ class Sampling:
             r = {}
             for variable in self._network.getVariables():
                 v = evidence.get(variable)
-                r.update({variable.getName(): v.floatValue() if v is not None else np.nan})
+                #vbl = bayesianpy.network.get_variable(self._network, variable.getName())
+                if bayesianpy.network.is_variable_discrete(variable):
+                    # get the state name
+                    value = variable.getStates().get(int(v.floatValue())).getName()
+                else:
+                    value = v.floatValue() if v is not None else np.nan
+
+                r.update({variable.getName(): value})
 
             results.append(r)
 
