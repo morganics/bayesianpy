@@ -102,16 +102,37 @@ class DiscretisationAnalysis:
 
         return results
 
+class Serialiser:
+    def __init__(self):
+        pass
+
+    def save(self, model, filename):
+        pass
+
+class FileSerialiser(Serialiser):
+    def __init__(self, filepath):
+        self._filepath = filepath
+
+    def save(self, model, filename):
+        if not os.path.exists(self._filepath):
+            os.mkdir(self._filepath)
+
+        if isinstance(model, bayesianpy.model.NetworkModel):
+            model = model.get_network()
+
+        bayesianpy.network.save(model, os.path.join(self._filepath, filename))
 
 class CrossValidatedAnalysis:
     """
         Used for comparing models
         """
 
-    def __init__(self, logger, shuffle=True):
+    def __init__(self, logger:logging.Logger, shuffle:bool=True, serialiser:Serialiser=Serialiser()):
         self._shuffle = shuffle
         self._logger = logger
         self._models = []
+        self._cv_method = None
+        self._serialiser = serialiser
 
     def get_models(self) -> List[bayesianpy.model.NetworkModel]:
         return self._models
@@ -120,7 +141,7 @@ class CrossValidatedAnalysis:
         pass
 
     def analyse(self, df: pd.DataFrame, templates: List[bayesianpy.template.Template], dataset, queries,
-                append_to_df=True, maximum_iterations=100):
+                append_to_df=True, maximum_iterations=100, include_model=False):
         network_factory = bayesianpy.network.NetworkFactory(self._logger)
 
         for k, (x_train, x_test) in enumerate(self._get_cv_splits(df)):
@@ -128,17 +149,29 @@ class CrossValidatedAnalysis:
                 nt = tpl.create(network_factory)
                 nt = bayesianpy.network.remove_single_state_nodes(nt)
                 model = bayesianpy.model.NetworkModel(nt, self._logger)
-                model.save('pretrained.bayes')
+
+                if self._serialiser is not None:
+                    self._serialiser.save(model, "pretrained.{}.bayes".format(k))
+
                 self._models.append(model)
+
                 try:
                     model.train(dataset.subset(x_train.index), maximum_iterations=maximum_iterations)
+                    if self._serialiser is not None:
+                        self._serialiser.save(model, "trained.{}.bayes".format(k))
+
                 except BaseException as e:
                     self._logger.warning(e)
                     continue
 
-                model.save("trained.bayes")
-                yield model.batch_query(dataset.subset(x_test.index), queries,
+
+                result = model.batch_query(dataset.subset(x_test.index), queries,
                                         append_to_df=append_to_df)
+
+                if include_model:
+                    yield model, result
+                else:
+                    yield result
 
 
 class KFoldAnalysis(CrossValidatedAnalysis):
@@ -163,10 +196,11 @@ class StratifiedKFoldAnalysis(CrossValidatedAnalysis):
     Used for comparing models
     """
 
-    def __init__(self, logger, shuffle=True, kfolds=3, class_col: str = None):
-        super().__init__(logger, shuffle)
+    def __init__(self, target_col:str, logger, shuffle=True, kfolds=3, serialiser=None):
+        super().__init__(logger, shuffle, serialiser=serialiser)
         self._kfolds = kfolds
-        self._class_col = class_col
+        self._class_col = target_col
+        self._serialiser = serialiser
 
     def _get_cv_splits(self, df):
         if self._cv_method is None:
@@ -174,6 +208,26 @@ class StratifiedKFoldAnalysis(CrossValidatedAnalysis):
 
         for train, test in self._cv_method.split(df, df[self._class_col]):
             yield df.ix[train], df.ix[test]
+
+from typing import Callable
+class CustomAnalysis(CrossValidatedAnalysis):
+    """
+    Used for comparing models
+    """
+
+    def __init__(self, logger,
+                 train_selector:Callable[[pd.DataFrame], pd.DataFrame],
+                 test_selector: Callable[[pd.DataFrame], pd.DataFrame]):
+        super().__init__(logger, shuffle=False)
+        self._train_selector = train_selector
+        self._test_selector = test_selector
+
+    def _split(self, df):
+        return self._train_selector(df), self._test_selector(df)
+
+    def _get_cv_splits(self, df):
+        return [self._split(df)]
+
 
 
 class TrainTestSplitAnalysis(CrossValidatedAnalysis):
@@ -190,7 +244,7 @@ class TrainTestSplitAnalysis(CrossValidatedAnalysis):
         x_train, x_test = train_test_split(df, test_size=0.33)
         return [(x_train, x_test)]
 
-class NoSplitAnalysis(CrossValidatedAnalysis):
+class DummyAnalysis(CrossValidatedAnalysis):
     """
     Used for comparing models
     """
@@ -214,7 +268,7 @@ class LogLikelihoodAnalysis:
         self._logger = logger
         self._split_strategy = split_strategy
 
-    def analyse(self, df: pd.DataFrame, templates: List[bayesianpy.template.Template], dataset, maximum_iterations=100):
+    def analyse(self, df: pd.DataFrame, templates: List[bayesianpy.template.Template], dataset):
 
         ll = defaultdict(list)
 
