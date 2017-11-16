@@ -137,6 +137,58 @@ class Evidence:
         self._evidence.clear()
         self._variables = network.getVariables()
 
+    def clear(self):
+        self._evidence.clear()
+
+    def get_evidence(self):
+        return self._evidence
+
+    def set_soft_all(self, variable_name, except_states:List[str]=None):
+        v = self._variables.get(variable_name)
+        evidence = {}
+
+        if except_states is None:
+            except_states = []
+
+        for st in v.getStates():
+            if st.getName() in except_states:
+                continue
+            evidence.update({st.getName() : 1})
+
+        return self.set_soft(variable_name, evidence)
+
+    def set_soft(self, variable_name, states:Dict[str, float]):
+        v = self._variables.get(variable_name)
+        v_states = v.getStates()
+        evidence = np.zeros(len(v_states))
+        for i, state in enumerate(v_states):
+            if state.getName() in states:
+                evidence[i] = states[state.getName()]
+
+        javaDblArray = jp.JArray(jp.JDouble)
+        j_evidence = javaDblArray(evidence.astype(float).tolist())
+        self._evidence.setStates(v, j_evidence)
+
+        return self._evidence
+
+    def set(self, variable_name, value:object):
+        v = self._variables.get(variable_name)
+        if v is None:
+            raise ValueError("The variable {} is not present in the network".format(v))
+
+        if bayesianpy.network.is_variable_discrete(v):
+            if v is None:
+                raise ValueError("Node {} does not exist".format(variable_name))
+
+            st = v.getStates().get(value)
+            if st is None:
+                raise ValueError("State {} does not exist in variable {}".format(value, variable_name))
+
+            self._evidence.setState(st)
+
+        elif bayesianpy.network.is_variable_continuous(v):
+            self._evidence.set(v, jp.java.lang.Double(float(value)))
+
     def apply(self, evidence: Dict[str, object]=None):
         """
         Apply evidence to a network
@@ -145,23 +197,7 @@ class Evidence:
         """
         if evidence is not None:
             for key, value in evidence.items():
-                v = self._variables.get(key)
-                if v is None:
-                    raise ValueError("The variable {} is not present in the network".format(v))
-
-                if bayesianpy.network.is_variable_discrete(v):
-                    if v is None:
-                        raise ValueError("Node {} does not exist".format(key))
-
-                    st = v.getStates().get(value)
-                    if st is None:
-                        raise ValueError("State {} does not exist in variable {}".format(value, key))
-
-                    self._evidence.setState(st)
-
-                elif bayesianpy.network.is_variable_continuous(v):
-                    self._evidence.set(v, jp.java.lang.Double(float(value)))
-
+                self.set(key, value)
 
         return self._evidence
 
@@ -253,6 +289,7 @@ class QueryConditionalJointProbability(QueryBase):
         self._head_variables = head_variables
         self._tail_variables = tail_variables
         self._discrete_variables = []
+        self._is_discrete_head = False
 
     def get_head_variables(self):
         return self._head_variables
@@ -267,7 +304,8 @@ class QueryConditionalJointProbability(QueryBase):
 
             if bayesianpy.network.is_variable_discrete(v):
                 if h in self._head_variables:
-                    raise ValueError("Bayespy only supports discrete tail variables (BayesServer is fine with it though!)")
+                    #raise ValueError("Bayespy only supports discrete tail variables (BayesServer is fine with it though!)")
+                    self._is_discrete_head = True
 
                 self._discrete_variables.append(v.getName())
             else:
@@ -278,7 +316,11 @@ class QueryConditionalJointProbability(QueryBase):
                                                                     else bayesServer().HeadTail.TAIL))
 
         self._network = network
-        self._distribution = bayesServer().CLGaussian(contexts)
+        if self._is_discrete_head:
+            self._distribution = bayesServer().Table(contexts)
+        else:
+            self._distribution = bayesServer().CLGaussian(contexts)
+
         self._query_distribution = bayesServerInference().QueryDistribution(self._distribution)
         inference_engine.getQueryDistributions().add(self._query_distribution)
 
@@ -289,37 +331,53 @@ class QueryConditionalJointProbability(QueryBase):
                 tv = bayesianpy.network.get_variable(self._network, v)
                 yield [state for state in tv.getStates()]
 
-        if len(self._head_variables) == 2 and len(self._tail_variables) == 0:
-            h0 = bayesianpy.network.get_variable(self._network, self._head_variables[0])
-            h1 = bayesianpy.network.get_variable(self._network, self._head_variables[1])
-            results.update({
-                    "{}_{}_covariance".format(h0.getName(), h1.getName()): self._distribution.getCovariance(h0, h1),
-                    "{}_mean".format(h0.getName()): self._distribution.getMean(h0),
-                    "{}_mean".format(h1.getName()): self._distribution.getMean(h1)
-                })
-        else:
-            for state_combinations in itertools.product(*state_generator(self._tail_variables)):
-
+        if self._is_discrete_head:
+            rows = []
+            query_variables = self._head_variables + self._tail_variables
+            # creates dataframe of combinations + probability.
+            for state_combinations in itertools.product(*state_generator(query_variables)):
+                row = {}
                 state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
                 for i, state in enumerate(state_combinations):
                     state_array[i] = state
 
-                dist = Distribution(self._head_variables, self._tail_variables,
-                                         [state.getName() for state in state_combinations])
+                for i, v in enumerate(state_combinations):
+                    row.update({query_variables[i]: state_array[i].getName()})
 
-                for i,h in enumerate(self._head_variables):
-                    v = bayesianpy.network.get_variable(self._network, h)
-                    mean = self._distribution.getMean(v, state_array)
-                    if dist.is_covariant():
-                        dist.append_mean(mean)
-                        for j,h1 in enumerate(self._head_variables):
-                            v1 = bayesianpy.network.get_variable(self._network, h1)
-                            cov = self._distribution.getCovariance(v, v1, state_array)
-                            dist.set_covariance_value(i, j, cov)
-                    else:
-                        dist.set_mean_variance(mean, self._distribution.getVariance(v, state_array))
+                row.update({'probability': self._distribution.get(state_array)})
+                rows.append(row)
+            return rows
+        else:
+            if len(self._head_variables) == 2 and len(self._tail_variables) == 0:
+                h0 = bayesianpy.network.get_variable(self._network, self._head_variables[0])
+                h1 = bayesianpy.network.get_variable(self._network, self._head_variables[1])
+                results.update({
+                    "{}_{}_covariance".format(h0.getName(), h1.getName()): self._distribution.getCovariance(h0, h1),
+                    "{}_mean".format(h0.getName()): self._distribution.getMean(h0),
+                    "{}_mean".format(h1.getName()): self._distribution.getMean(h1)
+                })
+            else:
+                for state_combinations in itertools.product(*state_generator(self._discrete_variables)):
 
-                results.update({dist.key(): dist})
+                    state_array = jp.JArray(state_combinations[0].getClass())(len(state_combinations))
+                    for i, state in enumerate(state_combinations):
+                        state_array[i] = state
+
+                        dist = Distribution(self._head_variables, self._tail_variables,
+                                             [state.getName() for state in state_combinations])
+                        for i,h in enumerate(self._head_variables):
+                            v = bayesianpy.network.get_variable(self._network, h)
+                            mean = self._distribution.getMean(v, state_array)
+                            if dist.is_covariant():
+                                dist.append_mean(mean)
+                                for j,h1 in enumerate(self._head_variables):
+                                    v1 = bayesianpy.network.get_variable(self._network, h1)
+                                    cov = self._distribution.getCovariance(v, v1, state_array)
+                                    dist.set_covariance_value(i, j, cov)
+                            else:
+                                dist.set_mean_variance(mean, self._distribution.getVariance(v, state_array))
+
+                    results.update({dist.key(): dist})
         return results
 
 
@@ -530,18 +588,18 @@ class QueryMeanVariance(QueryBase):
 
 def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, table_name: str,
                  variable_references: List[str],
-                 queries, logger, i):
+                 queries,
+                 create_data_reader_command_func,
+                 create_data_reader_options_func):
+
+    logger = logging.getLogger(__name__)
     try:
-        bayesianpy.jni.attach(logger, heap_space='1g')
+        bayesianpy.jni.attach(heap_space='1g')
 
         #TODO: abstract this back to the dataset object
-        data_reader = bayesServer().data.DatabaseDataReaderCommand(
-            connection_string,
-            "select * from {} where ix in ({})".format(table_name,
-                                                       ",".join(str(i) for i in dk.compute(df.index).tolist()))).executeReader()
-
+        data_reader = create_data_reader_command_func()
         network = bayesianpy.network.create_network_from_string(network_string)
-        reader_options = bayesServer().data.ReaderOptions("ix")
+        reader_options = create_data_reader_options_func()
         variable_refs = list(bayesianpy.network.create_variable_references(network, df,
                                                                            variable_references=variable_references))
 
@@ -558,7 +616,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, 
         ev = Evidence(network, inference_engine).apply()
 
         results = []
-
+        i = 0
         try:
             while reader.read(ev, bayesServer().data.DefaultReadOptions(True)):
                 result = {}
@@ -588,7 +646,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, 
         finally:
             reader.close()
             # bayespy.jni.detach()
-        return results
+        return pd.DataFrame(results).set_index('caseid')
 
     except BaseException as e:
         q = [str(query) for query in queries]
@@ -598,7 +656,7 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, 
 
 
 class BatchQuery:
-    def __init__(self, network, datastore, logger: logging.Logger):
+    def __init__(self, network, datastore:bayesianpy.data.SqlDataSet, logger: logging.Logger):
         self._logger = logger
         self._datastore = datastore
         # serialise the network as a string.
@@ -631,11 +689,17 @@ class BatchQuery:
 
         return r
 
-    def query(self, queries: List[QueryBase] = [QueryStatistics()], append_to_df=True,
-              variable_references: List[str] = [], max_threads=None):
+    def query(self, queries: List[QueryBase] = None, append_to_df=True,
+              variable_references: List[str] = None, max_threads=None):
 
         if not hasattr(queries, "__getitem__"):
             queries = [queries]
+
+        if variable_references is None:
+            variable_references = []
+
+        if queries is None:
+            queries = [QueryModelStatistics()]
 
         nt = self._network
         logger = self._logger
@@ -646,9 +710,10 @@ class BatchQuery:
         self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
 
         if processes == 1:
-            pdf = pd.DataFrame(_batch_query(self._datastore.get_dataframe(), conn, nt, table,
+            pdf = _batch_query(self._datastore.get_dataframe(), conn, nt, table,
                                             variable_references, queries,
-                                            logger, 0))
+                                            self._datastore.create_data_reader_command,
+                                            self._datastore.get_reader_options)
         else:
             # bit nasty, but the only way I could get jpype to stop hanging in Linux.
             ctx._force_start_method('spawn')
@@ -657,9 +722,10 @@ class BatchQuery:
                 pdf = pd.DataFrame()
                 for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
                                                                    variable_references, queries,
-                                                                   logger, 0),
+                                                                   self._datastore.create_data_reader_command,
+                                                                   self._datastore.get_reader_options),
                                            np.array_split(self._datastore.get_dataframe(), processes)):
-                    pdf = pdf.append(pd.DataFrame(result_set))
+                    pdf = pdf.append(result_set)
 
         df = pdf.set_index('caseid')
 
@@ -668,6 +734,44 @@ class BatchQuery:
         else:
             return df
 
+class DaskBatchQuery:
+    def __init__(self, network, datastore: bayesianpy.data.DaskDataset):
+        self._logger = logging.getLogger(__name__)
+        self._datastore = datastore
+        # serialise the network as a string.
+        from xml.dom import minidom
+        nt = network.saveToString()
+        reparsed = minidom.parseString(nt)
+        self._network = reparsed.toprettyxml(indent="  ")
+
+    def _generate_metadata(self, row, variable_references, queries):
+        return _batch_query(row, self._network, variable_references, queries)
+
+    def query(self, queries: List[QueryBase] = None, append_to_df=True,
+              variable_references: List[str] = None, max_threads=None):
+
+        from dask import multiprocessing
+        if not hasattr(queries, "__getitem__"):
+            queries = [queries]
+
+        if variable_references is None:
+            variable_references = []
+
+        if queries is None:
+            queries = [QueryModelStatistics()]
+
+        nt = self._network
+        dk = self._datastore.get_dataframe()
+
+        metadata = self._generate_metadata(dk.head(1), variable_references, queries)
+
+        results = dk.map_partitions(_batch_query, network_string=nt,
+                                                       variable_references=variable_references,
+                                                        queries=queries, meta=metadata).compute(get=multiprocessing.get)
+        if append_to_df:
+            return dk.join(results)
+        else:
+            return results
 
 class TrainingResults:
     def __init__(self, network, results: dict, logger: logging.Logger):
@@ -775,8 +879,8 @@ class NetworkModel:
             learning_options.setMaximumIterations(maximum_iterations)
 
         data_reader_command = dataset.create_data_reader_command()
-
         reader_options = dataset.get_reader_options()
+
         variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
         evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command,
@@ -795,7 +899,8 @@ class NetworkModel:
                 'unweighted_case_count': result.getUnweightedCaseCount(),
                 'bic': result.getBIC().floatValue()}, self._logger)
 
-    def batch_query(self, dataset: bayesianpy.data.DataSet, queries: List[QueryBase], append_to_df=True,
+    @bayesianpy.decorators.deprecated("Use the class method directly, either BatchQuery or DaskBatchQuery")
+    def batch_query(self, dataset: bayesianpy.data.SqlDataSet, queries: List[QueryBase], append_to_df=True,
                     variable_references: List[str] = [], max_threads=None):
         bq = BatchQuery(self._jnetwork, dataset, self._logger)
 
