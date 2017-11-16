@@ -5,6 +5,7 @@ from bayesianpy.data import DataFrame
 import os
 from typing import List
 import numpy as np
+import bayesianpy.dask as dk
 
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
@@ -154,11 +155,15 @@ class Builder:
                                     decimal_places=4,
                                     mode='EqualFrequencies',
                                     bins=[], zero_crossing=False):
+        node_name = str(node_name)
         if len(bins) == 0:
             options = bayesServerDiscovery().DiscretizationOptions()
             options.setInfiniteExtremes(infinite_extremes)
             options.setSuggestedBinCount(bin_count)
-            values = jp.java.util.Arrays.asList(data[node_name].astype(float).dropna().tolist())
+
+            # reads data from either a Pandas dataframe or dask, so will support out of memory and in-memory.
+            data_reader_cmd = bayesianpy.data.DaskDataset(data[[node_name]]).create_data_reader_command()
+
             if mode == 'EqualFrequencies':
                 ef = bayesServerDiscovery().EqualFrequencies()
             elif mode == 'EqualIntervals':
@@ -166,7 +171,12 @@ class Builder:
             else:
                 raise ValueError("mode not recognised")
 
-            intervals = ef.discretize(values, options, jp.JString(node_name))
+            # TODO: currently just looking at a single column at a time, which isn't very efficient.
+            columns = jp.java.util.Arrays.asList([bayesServerDiscovery().DiscretizationColumn(node_name)])
+            intervals = ef.discretize(data_reader_cmd, columns,
+                                      bayesServerDiscovery().DiscretizationAlgoOptions())\
+                                            .get(0).getIntervals()
+
             if zero_crossing:
                 end_point_value = 0.5
                 intervals = list(intervals.toArray())
@@ -237,22 +247,19 @@ class Builder:
         n_ = bayesServer().Node(v)
 
         if states is None:
-            if blanks is not None:
-                states = df[node_name].replace(np.nan, blanks).unique()
-            else:
-                states = df[node_name].replace("", np.nan).dropna().unique()
+            states = dk.compute(df[str(node_name)].dropna().unique()).tolist()
 
         for s in states:
             v.getStates().add(bayesServer().State(str(s)))
 
         if node_name in df.columns.tolist():
 
-            if DataFrame.is_int(df[node_name].dtype) or DataFrame.could_be_int(df[node_name]):
+            if DataFrame.is_int(df[str(node_name)].dtype) or DataFrame.could_be_int(df[str(node_name)]):
                 v.setStateValueType(bayesServer().StateValueType.INTEGER)
                 for state in v.getStates():
                     state.setValue(jp.java.lang.Integer(int(float(state.getName()))))
 
-            if DataFrame.is_bool(df[node_name].dtype):
+            if DataFrame.is_bool(df[str(node_name)].dtype):
                 v.setStateValueType(bayesServer().StateValueType.BOOLEAN)
                 for state in v.getStates():
                     state.setValue(state.getName() == 'True')
