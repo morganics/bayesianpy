@@ -89,12 +89,12 @@ class MixtureNaiveBayes(Template):
         if not dk.empty(self._discrete):
             for d_name in self._discrete.columns:
                 if d_name in self._discrete_states:
-                    states = self._discrete_states[d_name]
+                    states = self._discrete_states[str(d_name)]
                 else:
-                    states = dk.compute(self._discrete[d_name].dropna().unique()).tolist()
+                    states = dk.compute(self._discrete[str(d_name)].dropna().unique()).tolist()
 
                 try:
-                    c = builder.create_discrete_variable(network, self._discrete, d_name, states)
+                    c = builder.create_discrete_variable(network, self._discrete, str(d_name), states)
                 
                     builder.create_link(network, cluster, c)
                 except BaseException as e:
@@ -115,11 +115,11 @@ class WithoutEdges(Template):
         network = network_factory.create()
         #builder.create_cluster_variable(network, 5)
 
-        if not self._continuous.empty:
+        if not dk.empty(self._continuous):
             for c_name in self._continuous.columns:
                 builder.create_continuous_variable(network, c_name)
 
-        if not self._discrete.empty:
+        if not dk.empty(self._discrete):
             for d_name in self._discrete.columns:
                 builder.create_discrete_variable(network, self._discrete, d_name, blanks=self._blanks)
 
@@ -142,16 +142,16 @@ class DiscretisedMixtureNaiveBayes(Template):
         network = network_factory.create()
         cluster = builder.create_cluster_variable(network, self._latent_states)
 
-        if not self._continuous.empty:
+        if not dk.empty(self._continuous):
             for c_name in self._continuous.columns:
                 c = builder.create_discretised_variable(network, self._continuous, c_name, bin_count=self._bin_count,
                                                         mode=self._binning_mode, zero_crossing=self._zero_crossing)
 
                 builder.create_link(network, cluster, c)
 
-        if not self._discrete.empty:
+        if not dk.empty(self._discrete):
             for d_name in self._discrete.columns:
-                states = self._discrete[d_name].dropna().unique()
+                states = dk.compute(self._discrete[d_name].dropna().unique())
                 c = builder.create_discrete_variable(network, self._discrete, d_name, states)
                 builder.create_link(network, cluster, c)
 
@@ -176,11 +176,14 @@ class AutoStructure(Template):
 
         data_reader_command = self._dataset.create_data_reader_command()
 
-        reader_options = bayesServer().data.ReaderOptions()
+        reader_options = self._dataset.get_reader_options()
         network.getLinks().clear()
 
         variable_references = list(bayesianpy.network.create_variable_references(network, self._dataset.get_dataframe()))
-        evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command, jp.java.util.Arrays.asList(variable_references), reader_options)
+
+        evidence_reader_command = bayesServer().data.DefaultEvidenceReaderCommand(data_reader_command,
+                                                                                  jp.java.util.Arrays.asList(variable_references),
+                                                                                  reader_options)
 
         if self._engine == 'PC':
             options = bayesServerStructure().PCStructuralLearningOptions()
@@ -316,8 +319,8 @@ class WithDiscretisedVariables(Template):
 
     def create(self, network_factory: bayesianpy.network.NetworkFactory):
         network = self._template.create(network_factory)
-        for i, var in enumerate(self._discretised_variables):
-            node = builder.get_node(network, var)
+        for i, var in enumerate(self._discretised_variables.columns.tolist()):
+            node = builder.get_node(network, str(var))
             if node is not None:
 
                 links_from = [link.getFrom() for link in node.getLinks() if link.getFrom().getName() != var]
