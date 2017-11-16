@@ -137,6 +137,122 @@ class DataFrameWriter:
         else:
             return df.join(df1)
 
+class PandasDataReader:
+    def __init__(self, df:dd.DataFrame, partition_order:List[int]=None):
+        self._logger = logging.getLogger(__name__)
+        self._df = df
+        self._columns = ["index"] + [str(col) for col in self._df.columns.tolist()]
+        self._dtypes = [df.index.dtype] + df.dtypes.tolist()
+        self._i = 0
+        self._ordered_partitions = partition_order
+        self._iterator = self._iterator()
+
+    def _iterator(self):
+        if hasattr(self._df, 'npartitions'):
+            # is a dask dataframe.
+            for i in range(self._df.npartitions):
+                ordered_partition = self._ordered_partitions[i]
+                self._logger.info("Partition {}".format(ordered_partition))
+                df = self._df.get_partition(ordered_partition).compute()
+                for row in df.itertuples():
+                    yield row
+        else:
+            # is a pandas dataframe.
+            for row in self._df.itertuples():
+                yield row
+
+    def read(self):
+        try:
+            self.current_row = next(self._iterator)
+            self._i += 1
+            if self._i % 10000 == 0:
+                self._logger.info("Read {} Rows".format(self._i))
+            return jp.JBoolean(True)
+        except StopIteration:
+            return jp.JBoolean(False)
+
+    def close(self):
+        self._logger.info("Closed Dask DataReader (read {} rows)".format(self._i))
+
+    def getBoolean(self, columnIndex):
+        return bool(self.current_row[columnIndex])
+
+    def getColumnCount(self):
+        return len(self._df.columns)
+
+    def getColumnIndex(self, columnName):
+        return self._columns.index(columnName)
+
+    def _get_column_name(self, index) -> str:
+        return self._columns[index]
+
+    def getColumnType(self, columnIndex):
+        return bayesianpy.data._to_java_class(self._df[self._get_column_name(columnIndex)].dtype)
+
+    def getDouble(self, columnIndex):
+        return float(self.current_row[columnIndex])
+
+    def getFloat(self, columnIndex):
+        return float(self.current_row[columnIndex])
+
+    def getInt(self, columnIndex):
+        return int(self.current_row[columnIndex])
+
+    def getLong(self, columnIndex):
+        return int(self.current_row[columnIndex])
+
+    def getObject(self, columnIndex):
+
+        data_type = self._dtypes[columnIndex]
+
+        if data_type == np.int32:
+            return self.getInt(columnIndex)
+        if data_type == np.int64:
+            return self.getInt(columnIndex)
+        if data_type == np.float32:
+            return self.getFloat(columnIndex)
+        if data_type == np.float64:
+            return self.getFloat(columnIndex)
+        if data_type == np.bool:
+            return self.getBoolean(columnIndex)
+        if data_type == np.object:
+            return self.getString(columnIndex)
+
+        raise ValueError("Dtype {} not supported in Dask Data Reader".format(data_type))
+
+    def getString(self, columnIndex):
+        return str(self.current_row[columnIndex])
+
+    def isNull(self, columnIndex):
+        return pd.isnull(self.current_row[columnIndex])
+
+
+class PandasDataReaderCommand:
+    def __init__(self, df:dd.DataFrame):
+        self._df = df
+        self._logger = logging.getLogger(__name__)
+        self._i = 0
+        self._ordered_partitions = None
+
+    def _order_partitions(self, df):
+        ordering = {}
+        for partition in range(df.npartitions):
+            ordering.update({partition: int(df.get_partition(partition).head(1).index[0])})
+
+        partitions = sorted(ordering, key=ordering.get)
+        self._logger.info("Ordered Partitions: {}".format(partitions))
+        return partitions
+
+    def executeReader(self):
+        self._i += 1
+        self._logger.info("Creating Dask Data Reader (iteration: {})".format(self._i))
+
+        if self._ordered_partitions is None and hasattr(self._df, 'npartitions'):
+            # is a dask dataframe
+            self._ordered_partitions = self._order_partitions(self._df)
+
+        return bayesianpy.jni.jp.JProxy("com.bayesserver.data.DataReader",
+                                 inst=PandasDataReader(self._df, self._ordered_partitions))
 
 class AutoType:
     def __init__(self, df, discrete=[], continuous=[], continuous_to_discrete_limit = 20, max_states=150):
@@ -154,12 +270,12 @@ class AutoType:
                 if col in self._discrete:
                     continue
                 elif col in self._continuous:
-                    yield col
-                elif not DataFrame.is_float(self._df[col].dtype) and not DataFrame.is_int(self._df[col].dtype):
+                    yield str(col)
+                elif not DataFrame.is_float(self._df[str(col)].dtype) and not DataFrame.is_int(self._df[str(col)].dtype):
                     continue
 
-                elif len(self._df[col].unique()) > self._continuous_to_discrete_limit:
-                    yield col
+                elif len(self._df[str(col)].unique()) > self._continuous_to_discrete_limit:
+                    yield str(col)
             except BaseException as e:
                 print(col, e)
 
@@ -167,17 +283,17 @@ class AutoType:
     def get_discrete_variables(self):
         continuous = set(self.get_continuous_variables())
         for col in self._df.columns.tolist():
-            l = len(self._df[col].unique())
+            l = len(dk.compute(self._df[str(col)].unique()))
             if col in self._continuous:
                 continue
             elif l > self._max_states or l <= 1:
                 continue
-            elif DataFrame.is_timestamp(self._df[col].dtype):
+            elif DataFrame.is_timestamp(self._df[str(col)].dtype):
                 continue
             elif col in self._discrete:
-                yield col
+                yield str(col)
             elif col not in continuous:
-                yield col
+                yield str(col)
 
 
 class DataFrame:
@@ -674,6 +790,24 @@ class DefaultDataSet(SqlDataSet):
     def subset(self, indices:List[int]) -> 'DataSet':
         return DefaultDataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
 
+
+class DaskDataset(DataSet):
+    def __init__(self, df: dd.DataFrame):
+        super().__init__(df)
+        self._df = df
+
+    def get_dataframe(self) -> dd.DataFrame:
+        return self._df
+
+    def create_data_reader_command(self):
+        return bayesianpy.jni.jp.JProxy("com.bayesserver.data.DataReaderCommand",
+                                                       inst=PandasDataReaderCommand(self._df))
+
+    def cleanup(self):
+        pass
+
+    def subset(self, indices):
+        raise NotImplementedError("Haven't got round to doing this yet.")
 
 
 def as_probability(series, output_column='cdf'):
