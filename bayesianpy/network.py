@@ -3,7 +3,7 @@ import uuid
 from bayesianpy.jni import *
 from bayesianpy.data import DataFrame
 import os
-from typing import List
+from typing import List,Tuple
 import numpy as np
 import bayesianpy.dask as dk
 
@@ -148,6 +148,93 @@ class Builder:
         title += "{0:.{digits}f},{1:.{digits}f}".format(interval.getMinimum().floatValue(), interval.getMaximum().floatValue(), digits=decimal_places)
         title += ")" if interval.getMaximumEndPoint() == bayesServer().IntervalEndPoint.OPEN else "]"
         return title
+
+    @staticmethod
+    def create_discretised_variables(network, data, node_names, bin_count=4, infinite_extremes=True,
+                                            decimal_places=4, mode='EqualFrequencies',
+                                            zero_crossing=True, defined_bins:List[Tuple[float, float]]=None):
+        node_names = [str(name) for name in node_names]
+
+
+        if defined_bins is None:
+            options = bayesServerDiscovery().DiscretizationOptions()
+            options.setInfiniteExtremes(infinite_extremes)
+            options.setSuggestedBinCount(bin_count)
+
+            # reads data from either a Pandas dataframe or dask, so will support out of memory and in-memory.
+            data_reader_cmd = bayesianpy.data.DaskDataset(data[node_names]).create_data_reader_command()
+
+            if mode == 'EqualFrequencies':
+                ef = bayesServerDiscovery().EqualFrequencies()
+            elif mode == 'EqualIntervals':
+                ef = bayesServerDiscovery().EqualIntervals()
+            else:
+                raise ValueError("mode not recognised")
+
+            columns = jp.java.util.Arrays.asList([bayesServerDiscovery().DiscretizationColumn(name) for name in node_names])
+            column_intervals = ef.discretize(data_reader_cmd, columns,
+                                          bayesServerDiscovery().DiscretizationAlgoOptions())
+
+            if zero_crossing:
+                for i, interval in enumerate(column_intervals):
+                    end_point_value = 0.5
+                    intervals = list(interval.getIntervals().toArray())
+                    zero = bayesServer().Interval(jp.java.lang.Double(jp.java.lang.Double.NEGATIVE_INFINITY),
+                                                  jp.java.lang.Double(end_point_value), bayesServer().IntervalEndPoint.CLOSED,
+                                                  bayesServer().IntervalEndPoint.OPEN)
+
+                    if 0.5 < intervals[0].getMaximum().floatValue():
+                        # if the interval starts and ends at end_point_value then remove it
+                        if intervals[0].getMaximum() == end_point_value:
+                            intervals.pop(0)
+                        else:
+                            intervals[0].setMinimum(jp.java.lang.Double(0.5))
+                            intervals[0].setMinimumEndPoint(bayesServer().IntervalEndPoint.CLOSED)
+
+                        intervals = [zero] + intervals
+
+                    v = bayesServer().Variable(node_names[i], bayesServer().VariableValueType.DISCRETE)
+                    v.setStateValueType(bayesServer().StateValueType.DOUBLE_INTERVAL)
+                    n = bayesServer().Node(v)
+                    for interval in intervals:
+                        v.getStates().add(
+                            bayesServer().State("{}".format(Builder._create_interval_name(interval, decimal_places)),
+                                                interval))
+
+                    network.getNodes().add(n)
+                    yield n
+        else:
+
+            for node in node_names:
+                intervals = []
+                for bin in defined_bins:
+                    minEndPoint = bayesServer().IntervalEndPoint.CLOSED
+                    maxEndPoint = bayesServer().IntervalEndPoint.OPEN
+
+                    if np.isneginf(float(bin[0])):
+                        a = jp.java.lang.Double(jp.java.lang.Double.NEGATIVE_INFINITY)
+                    else:
+                        a = jp.java.lang.Double(bin[0])
+
+                    if np.isposinf(float(bin[1])):
+                        b = jp.java.lang.Double(jp.java.lang.Double.POSITIVE_INFINITY)
+                    else:
+                        b = jp.java.lang.Double(bin[1])
+
+                    intervals.append(
+                            bayesServer().Interval(a, b, minEndPoint,
+                                                   maxEndPoint))
+
+                v = bayesServer().Variable(node, bayesServer().VariableValueType.DISCRETE)
+                v.setStateValueType(bayesServer().StateValueType.DOUBLE_INTERVAL)
+                n = bayesServer().Node(v)
+                for interval in intervals:
+                    v.getStates().add(
+                        bayesServer().State("{}".format(Builder._create_interval_name(interval, decimal_places)),
+                                            interval))
+
+                network.getNodes().add(n)
+                yield n
 
     @staticmethod
     def create_discretised_variable(network, data, node_name, bin_count=4,
