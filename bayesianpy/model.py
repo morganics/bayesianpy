@@ -19,11 +19,8 @@ import multiprocess.context as ctx
 import pathos.multiprocessing as mp
 import itertools
 import math
-
-import bayesianpy.dask as dk
-
+import bayesianpy.reader
 from typing import List, Dict
-import traceback
 
 class QueryOutput:
     def __init__(self, continuous, discrete):
@@ -586,20 +583,20 @@ class QueryMeanVariance(QueryBase):
         return "P({})".format(self._variable_name)
 
 
-def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, table_name: str,
+def _batch_query(df: pd.DataFrame, network_string: str,
                  variable_references: List[str],
-                 queries,
-                 create_data_reader_command_func,
-                 create_data_reader_options_func):
+                 queries: List[QueryBase],
+                 create_data_reader_command:bayesianpy.reader.Creatable,
+                 create_data_reader_options:bayesianpy.reader.Creatable):
 
     logger = logging.getLogger(__name__)
     try:
         bayesianpy.jni.attach(heap_space='1g')
 
         #TODO: abstract this back to the dataset object
-        data_reader = create_data_reader_command_func()
+        data_reader = create_data_reader_command.create().executeReader()
         network = bayesianpy.network.create_network_from_string(network_string)
-        reader_options = create_data_reader_options_func()
+        reader_options = create_data_reader_options.create()
         variable_refs = list(bayesianpy.network.create_variable_references(network, df,
                                                                            variable_references=variable_references))
 
@@ -646,13 +643,15 @@ def _batch_query(df: pd.DataFrame, connection_string: str, network_string: str, 
         finally:
             reader.close()
             # bayespy.jni.detach()
+        if len(results) == 0:
+            return pd.DataFrame()
+
         return pd.DataFrame(results).set_index('caseid')
 
     except BaseException as e:
         q = [str(query) for query in queries]
 
         logger.error("Unexpected Error: {}. Using queries: {}".format(e, r"\n ".join(q)))
-
 
 
 class BatchQuery:
@@ -709,30 +708,35 @@ class BatchQuery:
 
         self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
 
+        schema = bayesianpy.data.DataFrame.get_schema(self._datastore.get_dataframe())
+
         if processes == 1:
-            pdf = _batch_query(self._datastore.get_dataframe(), conn, nt, table,
+            pdf = _batch_query(schema, nt,
                                             variable_references, queries,
-                                            self._datastore.create_data_reader_command,
-                                            self._datastore.get_reader_options)
+                                            self._datastore.create_data_reader_command(),
+                                            self._datastore.get_reader_options())
         else:
             # bit nasty, but the only way I could get jpype to stop hanging in Linux.
             ctx._force_start_method('spawn')
+            drc = self._datastore.create_data_reader_command()
+            ro = self._datastore.get_reader_options()
+
+            commands = []
+            for group in np.array_split(self._datastore.get_dataframe(), processes):
+                subset = self._datastore.subset(group.index.tolist())
+                commands.append(subset.create_data_reader_command())
 
             with mp.Pool(processes=processes) as pool:
                 pdf = pd.DataFrame()
-                for result_set in pool.map(lambda df: _batch_query(df, conn, nt, table,
-                                                                   variable_references, queries,
-                                                                   self._datastore.create_data_reader_command,
-                                                                   self._datastore.get_reader_options),
-                                           np.array_split(self._datastore.get_dataframe(), processes)):
+
+                for result_set in pool.map(lambda drc: _batch_query(schema, nt, variable_references, queries,
+                                                                   drc, ro), commands):
                     pdf = pdf.append(result_set)
 
-        df = pdf.set_index('caseid')
-
         if append_to_df:
-            return self._datastore.get_dataframe().join(df)
+            return self._datastore.get_dataframe().join(pdf)
         else:
-            return df
+            return pdf
 
 class DaskBatchQuery:
     def __init__(self, network, datastore: bayesianpy.data.DaskDataset):
@@ -745,7 +749,9 @@ class DaskBatchQuery:
         self._network = reparsed.toprettyxml(indent="  ")
 
     def _generate_metadata(self, row, variable_references, queries):
-        return _batch_query(row, self._network, variable_references, queries)
+        return _batch_query(row, self._network, variable_references, queries,
+                                self._datastore.create_data_reader_command(),
+                                self._datastore.get_reader_options())
 
     def query(self, queries: List[QueryBase] = None, append_to_df=True,
               variable_references: List[str] = None, max_threads=None):
@@ -766,8 +772,11 @@ class DaskBatchQuery:
         metadata = self._generate_metadata(dk.head(1), variable_references, queries)
 
         results = dk.map_partitions(_batch_query, network_string=nt,
-                                                       variable_references=variable_references,
-                                                        queries=queries, meta=metadata).compute(get=multiprocessing.get)
+                                    variable_references=variable_references,
+                                    queries=queries,
+                                    create_data_reader_command=self._datastore.create_data_reader_command(),
+                                    create_data_reader_options=self._datastore.get_reader_options(),
+                                    meta=metadata).compute(get=multiprocessing.get)
         if append_to_df:
             return dk.join(results)
         else:
@@ -862,7 +871,8 @@ class NetworkModel:
     def is_trained(self):
         return bayesianpy.network.is_trained(self._jnetwork)
 
-    def train(self, dataset: bayesianpy.data.DataSet, seed:int=None, maximum_iterations:int=None)\
+    def train(self, dataset: bayesianpy.data.DataSet, seed:int=None, maximum_iterations:int=100,
+                    maximum_concurrency:int=1)\
             -> TrainingResults:
         """
         Train a model on data provided in the constructor
@@ -872,14 +882,16 @@ class NetworkModel:
                                                          self._inference_factory.get_inference_factory())
         learning_options = bayesServerParams().ParameterLearningOptions()
 
+        learning_options.setMaximumConcurrency(jp.java.lang.Integer(maximum_concurrency))
+
         if seed is not None:
             learning_options.setSeed(int(seed))
 
         if maximum_iterations is not None:
             learning_options.setMaximumIterations(maximum_iterations)
 
-        data_reader_command = dataset.create_data_reader_command()
-        reader_options = dataset.get_reader_options()
+        data_reader_command = dataset.create_data_reader_command().create()
+        reader_options = dataset.get_reader_options().create()
 
         variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
 
