@@ -4,6 +4,7 @@ import bayesianpy.network
 from bayesianpy.jni import *
 import bayesianpy.dask as dk
 import logging
+from typing import List, Tuple
 
 class Template:
     def __init__(self, discrete=pd.DataFrame(), continuous=pd.DataFrame(), label:str=None):
@@ -280,7 +281,7 @@ class AutoStructure(Template):
 
         return network
 
-from typing import List
+
 
 class WithTreeStructure(Template):
     def __init__(self, template: Template, root_node:str):
@@ -302,13 +303,13 @@ class WithTreeStructure(Template):
 
 
 class WithDiscretisedVariables(Template):
-    def __init__(self, template: Template, logger, discretised_variables:List[str]=None, bins:List[int]=None,
+    def __init__(self, template: Template, discretised_variables:List[str]=None, bins:List[Tuple[float,float]]=None,
                  mode='EqualFrequencies', default_bin_count:int=4, zero_crossing=False):
 
         super().__init__(discrete=template._discrete, continuous=template._continuous)
         self._template = template
         self._discretised_variables = discretised_variables
-        self._logger = logger
+        self._logger = logging.getLogger(__name__)
         self._bins = bins
         self._mode = mode
         self._default_bin_count = default_bin_count
@@ -328,19 +329,52 @@ class WithDiscretisedVariables(Template):
 
                 network.getNodes().remove(node)
 
-            bin_count = self._default_bin_count if self._bins is None else self._bins[i]
-
-            n = builder.create_discretised_variable(network, self._continuous, var,
-                                                    bin_count=bin_count, mode=self._mode, zero_crossing=self._zero_crossing)
+        for node in builder.create_discretised_variables(network, self._continuous, self._discretised_variables.columns.tolist(),
+                        bin_count=self._default_bin_count, mode=self._mode, zero_crossing=self._zero_crossing, defined_bins=self._bins):
 
             if node is not None:
                 for l in links_from:
-                    builder.create_link(network, l, n)
+                    builder.create_link(network, l, node)
 
                 for l in links_to:
-                    builder.create_link(network, n, l)
+                    builder.create_link(network, node, l)
 
         return network
+#
+# class WithContinuousVariables(Template):
+#
+#     def __init__(self, template: Template, continuous_variables:pd.DataFrame):
+#         super().__init__(discrete=template._discrete, continuous=template._continuous)
+#         self._template = template
+#         self._logger = logging.getLogger(__name__)
+#
+#     def create(self, network_factory: bayesianpy.network.NetworkFactory):
+#         network = self._template.create(network_factory)
+#         for i, var in enumerate(self._continuous.columns.tolist()):
+#             node = builder.get_node(network, str(var))
+#             if node is not None:
+#
+#                 links = node.getLinks()
+#                 network.getNodes().remove(node)
+#
+#                 c = builder.create_continuous_variable(network, str(var))
+#                 for link in links:
+#                     builder.create_link(network, link.getFrom(), link.getTo())
+#
+#
+#
+#         for node in builder.create_discretised_variables(network, self._continuous, self._discretised_variables.columns.tolist(),
+#                         bin_count=self._default_bin_count, mode=self._mode, zero_crossing=self._zero_crossing):
+#
+#             if node is not None:
+#                 for l in links_from:
+#                     builder.create_link(network, l, node)
+#
+#                 for l in links_to:
+#                     builder.create_link(network, node, l)
+#
+#         return network
+
 
 class With0Nodes(Template):
 
