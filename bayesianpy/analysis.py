@@ -1,5 +1,4 @@
 from sklearn.model_selection import KFold as NewKFold, StratifiedKFold
-from sklearn.cross_validation import KFold
 import pandas as pd
 import bayesianpy.network
 from bayesianpy.jni import bayesServerAnalysis
@@ -60,7 +59,7 @@ class DiscretisationAnalysis:
         self._logger = logger
 
     def analyse(self, df: pd.DataFrame, continuous_variable_names: List[str]):
-        kf = KFold(df.shape[0], n_folds=3, shuffle=self._shuffle)
+        kf = NewKFold(n_splits=3, shuffle=self._shuffle)
 
         network_factory = bayesianpy.network.NetworkFactory(self._logger)
         variations = [1, 5, 10, 20, 30]
