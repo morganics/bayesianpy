@@ -21,6 +21,8 @@ import itertools
 import math
 import bayesianpy.reader
 from typing import List, Dict
+import dask
+import dill
 
 class QueryOutput:
     def __init__(self, continuous, discrete):
@@ -33,6 +35,9 @@ class QueryBase:
         pass
 
     def results(self, inference_engine, query_output) -> dict:
+        pass
+
+    def reset(self):
         pass
 
 
@@ -427,6 +432,7 @@ class QueryMostLikelyState(QueryBase):
         self._distribution = None
         self._output_dtype = output_dtype
         self._suffix = suffix
+        self._variable = None
 
     def setup(self, network, inference_engine, query_options):
         distribution = None
@@ -444,6 +450,10 @@ class QueryMostLikelyState(QueryBase):
 
         self._distribution = distribution
         inference_engine.getQueryDistributions().add(qd)
+
+    def reset(self):
+        self._distribution = None
+        self._variable = None
 
     def results(self, inference_engine, query_output):
         states = {}
@@ -535,6 +545,10 @@ class QueryLogLikelihood(QueryBase):
         result.update({name: value})
         return result
 
+    def reset(self):
+        self._query_distribution = None
+        self._distribution = None
+
     def __str__(self):
         return "{}: {}".format(__name__, ", ".join(self._variable_names))
 
@@ -549,6 +563,7 @@ class QueryMeanVariance(QueryBase):
         self._result_variance_suffix = result_variance_suffix
         self._retract_evidence = retract_evidence
         self._output_dtype = output_dtype
+        self._variable = None
 
     def setup(self, network, inference_engine, query_options):
         self._variable = bayesianpy.network.get_variable(network, self._variable_name)
@@ -579,6 +594,10 @@ class QueryMeanVariance(QueryBase):
         return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
 
+    def reset(self):
+        self._query = None
+        self._variable = None
+
     def __str__(self):
         return "P({})".format(self._variable_name)
 
@@ -586,18 +605,26 @@ class QueryMeanVariance(QueryBase):
 def _batch_query(df: pd.DataFrame, network_string: str,
                  variable_references: List[str],
                  queries: List[QueryBase],
-                 create_data_reader_command:bayesianpy.reader.Creatable,
-                 create_data_reader_options:bayesianpy.reader.Creatable):
+                 create_data_reader_command:bayesianpy.reader.CreatableWithDf,
+                 create_data_reader_options:bayesianpy.reader.Creatable,
+                 logger:logging.Logger=None):
 
-    logger = logging.getLogger(__name__)
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
     try:
         bayesianpy.jni.attach(heap_space='1g')
+        schema = bayesianpy.data.DataFrame.get_schema(df)
+        drc = create_data_reader_command.create(df)
+        df = None
+        if isinstance(drc, jp.JProxy):
+            data_reader = drc.getCallable('executeReader')()
+        else:
+            data_reader = drc.executeReader()
 
-        #TODO: abstract this back to the dataset object
-        data_reader = create_data_reader_command.create().executeReader()
         network = bayesianpy.network.create_network_from_string(network_string)
         reader_options = create_data_reader_options.create()
-        variable_refs = list(bayesianpy.network.create_variable_references(network, df,
+        variable_refs = list(bayesianpy.network.create_variable_references(network, schema,
                                                                            variable_references=variable_references))
 
         reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
@@ -636,6 +663,7 @@ def _batch_query(df: pd.DataFrame, network_string: str,
                 if i % 500 == 0:
                     logger.info("Queried case {}".format(i))
 
+
                 i += 1
         except BaseException as e:
             logger.error("Unexpected Error!")
@@ -655,7 +683,7 @@ def _batch_query(df: pd.DataFrame, network_string: str,
 
 
 class BatchQuery:
-    def __init__(self, network, datastore:bayesianpy.data.SqlDataSet, logger: logging.Logger):
+    def __init__(self, network, datastore:bayesianpy.data.DataSet, logger: logging.Logger):
         self._logger = logger
         self._datastore = datastore
         # serialise the network as a string.
@@ -701,14 +729,12 @@ class BatchQuery:
             queries = [QueryModelStatistics()]
 
         nt = self._network
-        logger = self._logger
-        conn = self._datastore.get_connection()
-        table = self._datastore.table
         processes = self._calc_num_threads(len(self._datastore.data), len(queries), max_threads=max_threads)
 
         self._logger.info("Using {} processes to query {} rows".format(processes, len(self._datastore.data)))
 
-        schema = bayesianpy.data.DataFrame.get_schema(self._datastore.get_dataframe())
+        df = self._datastore.get_dataframe()
+        schema = bayesianpy.data.DataFrame.get_schema(df)
 
         if processes == 1:
             pdf = _batch_query(schema, nt,
@@ -718,7 +744,6 @@ class BatchQuery:
         else:
             # bit nasty, but the only way I could get jpype to stop hanging in Linux.
             ctx._force_start_method('spawn')
-            drc = self._datastore.create_data_reader_command()
             ro = self._datastore.get_reader_options()
 
             commands = []
@@ -730,7 +755,7 @@ class BatchQuery:
                 pdf = pd.DataFrame()
 
                 for result_set in pool.map(lambda drc: _batch_query(schema, nt, variable_references, queries,
-                                                                   drc, ro), commands):
+                                                                   drc, ro, logger=self._logger), commands):
                     pdf = pdf.append(result_set)
 
         if append_to_df:
@@ -748,15 +773,46 @@ class DaskBatchQuery:
         reparsed = minidom.parseString(nt)
         self._network = reparsed.toprettyxml(indent="  ")
 
-    def _generate_metadata(self, row, variable_references, queries):
-        return _batch_query(row, self._network, variable_references, queries,
+    def _calc_num_threads(self, df_size: int, query_size: int, max_threads=None) -> int:
+        num_queries = df_size * query_size
+
+        if mp.cpu_count() == 1:
+            max = 1
+        else:
+            max = mp.cpu_count() - 1
+
+        calc = int(num_queries / 5000)
+        if calc > max:
+            r = max
+        elif calc <= 1:
+            if num_queries > 1000:
+                r = 2
+            else:
+                r = 1
+        else:
+            r = calc
+
+        if max_threads is not None and r > max_threads:
+            return max_threads
+
+        return r
+
+    def _generate_dask_metadata(self, row, variable_references, queries) -> pd.DataFrame:
+        meta = _batch_query(row, self._network, variable_references, queries,
                                 self._datastore.create_data_reader_command(),
                                 self._datastore.get_reader_options())
+
+        #row = row.append(meta)
+
+        for query in queries:
+            # empty JPype references out, so we don't try and pickle them later.
+            query.reset()
+
+        return bayesianpy.data.DataFrame.get_schema(meta)
 
     def query(self, queries: List[QueryBase] = None, append_to_df=True,
               variable_references: List[str] = None, max_threads=None):
 
-        from dask import multiprocessing
         if not hasattr(queries, "__getitem__"):
             queries = [queries]
 
@@ -769,14 +825,21 @@ class DaskBatchQuery:
         nt = self._network
         dk = self._datastore.get_dataframe()
 
-        metadata = self._generate_metadata(dk.head(1), variable_references, queries)
+        metadata = self._generate_dask_metadata(dk.head(1), variable_references, queries)
 
+        drc = self._datastore.create_data_reader_command()
+        ro = self._datastore.get_reader_options()
+        #from dask import multiprocessing
         results = dk.map_partitions(_batch_query, network_string=nt,
                                     variable_references=variable_references,
                                     queries=queries,
-                                    create_data_reader_command=self._datastore.create_data_reader_command(),
-                                    create_data_reader_options=self._datastore.get_reader_options(),
-                                    meta=metadata).compute(get=multiprocessing.get)
+                                    create_data_reader_command=drc,
+                                    create_data_reader_options=ro,
+                                    logger=self._logger,
+                                    meta=metadata)
+            #.compute(get=multiprocessing.get,
+            #                                               num_workers=self._calc_num_threads(len(dk), len(queries),
+            #                                               max_threads=max_threads))
         if append_to_df:
             return dk.join(results)
         else:
