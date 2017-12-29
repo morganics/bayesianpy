@@ -2,7 +2,7 @@ from bayesianpy.network import Builder as builder
 import pandas as pd
 import bayesianpy.network
 from bayesianpy.jni import *
-import bayesianpy.dask as dk
+import bayesianpy.distributed as dk
 import logging
 from typing import List, Tuple
 
@@ -175,9 +175,9 @@ class AutoStructure(Template):
         if len(self._links) > 0 and self._use_same_model:
             return self._links
 
-        data_reader_command = self._dataset.create_data_reader_command()
+        data_reader_command = self._dataset.create_data_reader_command().create()
 
-        reader_options = self._dataset.get_reader_options()
+        reader_options = self._dataset.get_reader_options().create()
         network.getLinks().clear()
 
         variable_references = list(bayesianpy.network.create_variable_references(network, self._dataset.get_dataframe()))

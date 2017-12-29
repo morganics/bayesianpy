@@ -11,7 +11,7 @@ import os
 from bayesianpy.decorators import listify
 import dask.dataframe as dd
 from typing import Iterable
-import bayesianpy.dask as dk
+import bayesianpy.distributed as dk
 from collections import defaultdict
 import bayesianpy.utils
 import bayesianpy.reader
@@ -193,6 +193,11 @@ class DataFrame:
                                     for name, series in df.head(1).iteritems()])
 
     @staticmethod
+    def get_schema_as_dict(df) -> Dict[object,object]:
+        schema = DataFrame.get_schema(df)
+        return {col: schema[col].dtype for col in schema.columns}
+
+    @staticmethod
     def is_timestamp(dtype):
         for ts in ['timestamp64', 'timedelta64', 'datetime64']:
             if ts in str(dtype):
@@ -214,7 +219,7 @@ class DataFrame:
 
     @staticmethod
     def is_int(dtype):
-        return str(dtype) in {"int32", "int64"}
+        return str(dtype) in {"int32", "int64", "uint32", "uint64"}
 
     @staticmethod
     def is_bool(dtype):
@@ -428,7 +433,7 @@ class DataSet:
     def write(self, if_exists:str=None):
         pass
 
-    def create_data_reader_command(self) -> bayesianpy.reader.Creatable:
+    def create_data_reader_command(self) -> bayesianpy.reader.CreatableWithDf:
         pass
 
     def cleanup(self):
@@ -491,7 +496,8 @@ class SqlDataSet(DataSet):
 
     def create_query(self):
         return "select * from {} where {} in ({}) order by {} asc".format(self.table, self.get_index_name(),
-                                                                           ",".join(str(i) for i in self.data.index), self.get_index_name())
+                                                                           ",".join(str(i) for
+                                                                                i in bayesianpy.distributed.compute(self.data.index).tolist()), self.get_index_name())
 
     def create_data_reader_command(self):
         """

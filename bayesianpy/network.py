@@ -5,7 +5,7 @@ from bayesianpy.data import DataFrame
 import os
 from typing import List,Tuple
 import numpy as np
-import bayesianpy.dask as dk
+import bayesianpy.distributed as dk
 
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
@@ -162,7 +162,7 @@ class Builder:
             options.setSuggestedBinCount(bin_count)
 
             # reads data from either a Pandas dataframe or dask, so will support out of memory and in-memory.
-            data_reader_cmd = bayesianpy.data.DaskDataset(data[node_names]).create_data_reader_command()
+            data_reader_cmd = bayesianpy.data.DaskDataset(data[node_names]).create_data_reader_command().create()
 
             if mode == 'EqualFrequencies':
                 ef = bayesServerDiscovery().EqualFrequencies()
@@ -249,7 +249,7 @@ class Builder:
             options.setSuggestedBinCount(bin_count)
 
             # reads data from either a Pandas dataframe or dask, so will support out of memory and in-memory.
-            data_reader_cmd = bayesianpy.data.DaskDataset(data[[node_name]]).create_data_reader_command()
+            data_reader_cmd = bayesianpy.data.DaskDataset(data[[node_name]]).create_data_reader_command().create()
 
             if mode == 'EqualFrequencies':
                 ef = bayesServerDiscovery().EqualFrequencies()

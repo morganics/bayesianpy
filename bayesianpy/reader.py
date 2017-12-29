@@ -10,13 +10,19 @@ class Creatable:
     def create(self):
         pass
 
-class CreateSqlDataReaderCommand(Creatable):
+
+class CreatableWithDf:
+    def create(self, df:pd.DataFrame):
+        pass
+
+
+class CreateSqlDataReaderCommand(CreatableWithDf):
 
     def __init__(self, connection_string, query_string):
         self._conn = connection_string
         self._query = query_string
 
-    def create(self):
+    def create(self, _:pd.DataFrame):
         data_reader_command = bayesServer().data.DatabaseDataReaderCommand(
             self._conn,
             self._query)
@@ -36,13 +42,14 @@ class CreateReaderOptions(Creatable):
 
 
 
-class CreateDataFrameReaderCommand(Creatable):
-    def __init__(self, dataframe):
-        self._df = dataframe
+class CreateDataFrameReaderCommand:
+    def __init__(self, ddf:dd.DataFrame):
+        self._df = ddf
 
-    def create(self):
+    def create(self, df:pd.DataFrame=None):
         return jp.JProxy("com.bayesserver.data.DataReaderCommand",
-                                        inst=PandasDataReaderCommand(self._df))
+                                        inst=PandasDataReaderCommand(self._df if df is None else df))
+
 
 def _to_java_class(data_type):
     """
@@ -80,10 +87,7 @@ class PandasDataReader:
     def _iterator(self):
         if hasattr(self._df, 'npartitions'):
             # is a dask dataframe.
-            for i in range(self._df.npartitions):
-                if i not in self._ordered_partitions:
-                    continue
-
+            for i in range(len(self._ordered_partitions)):
                 ordered_partition = self._ordered_partitions[i]
                 self._logger.info("Partition {}".format(ordered_partition))
                 df = self._df.get_partition(ordered_partition).compute()
@@ -190,7 +194,7 @@ class PandasDataReaderCommand:
         self._logger.info("Ordered Partitions: {}".format(partitions))
         return partitions
 
-    def executeReader(self):
+    def executeReader(self) -> jp.JProxy:
         self._i += 1
         self._logger.info("Creating Dask Data Reader (iteration: {})".format(self._i))
 
