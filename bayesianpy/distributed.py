@@ -3,7 +3,43 @@ import pandas as pd
 import dask.dataframe as dd
 import dask.array as da
 import numpy as np
+import pathos.multiprocessing as mp
 
+class DaskPool:
+    '''
+    We need to use DaskPool to avoid hanging in linux when multiprocessing is required. Jpype hangs
+    when processes are not spawned.
+    '''
+    def __init__(self, processes:int=None):
+        self._processes = processes
+
+    def _calc_threads(self):
+        if mp.cpu_count() == 1:
+            max = 1
+        else:
+            max = mp.cpu_count() - 1
+
+        return max
+
+    def __enter__(self):
+
+        import dask.multiprocessing
+        import multiprocess.context as ctx
+
+        ctx._force_start_method('spawn')
+
+        self._pool = mp.Pool(processes=self._calc_threads() if self._processes is None else self._processes)
+        self._options = dask.context.set_options(pool=self._pool)
+
+        return self
+
+    def get(self):
+        import dask.multiprocessing
+        return dask.multiprocessing.get
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._options.__exit__(exc_type, exc_val, exc_tb)
+        self._pool.__exit__(exc_type, exc_val, exc_tb)
 
 def compute(df):
     if hasattr(df, 'compute'):
