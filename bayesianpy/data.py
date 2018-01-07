@@ -418,7 +418,7 @@ class DataSet:
         self._weight_column = weight_column
 
     def subset(self, indices:List[int]) -> 'DataSet':
-        return DataSet(self.data.iloc[indices], self._logger, identifier=self.uuid)
+        return DataSet(self.data.loc[indices], self._logger, identifier=self.uuid)
 
     def get_index_column(self):
         return "ix"
@@ -673,7 +673,7 @@ class DefaultDataSet(SqlDataSet):
             self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
 
     def subset(self, indices:List[int]) -> 'DataSet':
-        return DefaultDataSet(self.data.iloc[indices], self._db_dir, self._logger, identifier=self.uuid)
+        return DefaultDataSet(self.data.loc[indices], self._db_dir, self._logger, identifier=self.uuid)
 
 
 class DaskDataset(DataSet):

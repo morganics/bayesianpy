@@ -754,8 +754,9 @@ class BatchQuery:
             with mp.Pool(processes=processes) as pool:
                 pdf = pd.DataFrame()
 
+                # logger with StreamHandler does not pickle, so best to leave it out as an option.
                 for result_set in pool.map(lambda drc: _batch_query(schema, nt, variable_references, queries,
-                                                                   drc, ro, logger=self._logger), commands):
+                                                                   drc, ro), commands):
                     pdf = pdf.append(result_set)
 
         if append_to_df:
@@ -829,7 +830,7 @@ class DaskBatchQuery:
 
         drc = self._datastore.create_data_reader_command()
         ro = self._datastore.get_reader_options()
-        #from dask import multiprocessing
+
         results = dk.map_partitions(_batch_query, network_string=nt,
                                     variable_references=variable_references,
                                     queries=queries,
