@@ -235,7 +235,7 @@ class DataFrame:
             return True
 
         if DataFrame.is_float(col.dtype):
-            for val in col.dropna().unique():
+            for val in dk.compute(col.dropna().unique()):
                 if int(val) != val:
                     return False
 
@@ -483,10 +483,12 @@ class DataTableDataSet(DataSet):
 
 
 class SqlDataSet(DataSet):
-    def __init__(self, df: pd.DataFrame, logger:logging.Logger=None, identifier=None, weight_column=None):
+    def __init__(self, df: pd.DataFrame, logger:logging.Logger=None, identifier=None, weight_column=None,
+                    ):
         super().__init__(df, logger, identifier=identifier, weight_column=weight_column)
         self._engine = None
         self.table = "table_" + self.uuid
+
 
     def get_index_name(self):
         return "ix"
@@ -507,9 +509,9 @@ class SqlDataSet(DataSet):
         """
         return bayesianpy.reader.CreateSqlDataReaderCommand(self.get_connection(), self.create_query())
 
-    def write(self, if_exists:str=None):
+    def write(self, if_exists:str=None, use_index=True):
         self._logger.info("Writing rows to storage")
-        dk.to_sql(self.data, self.table, self._engine, if_exists=if_exists)
+        dk.to_sql(self.data, self.table, self._engine, if_exists=if_exists, index=use_index)
         self._logger.info("Finished writing rows to storage")
 
 class ExcelDataSet(DataSet):
@@ -566,33 +568,40 @@ class ExcelDataSet(DataSet):
 class MysqlDataSet(SqlDataSet):
     ''' Good for larger datasets '''
     def __init__(self, df: pd.DataFrame, username:str, password:str, server:str,
-                 logger: logging.Logger = None, identifier=None):
+                 logger: logging.Logger = None, identifier=None, database=None,
+                 use_index=True, encoding='utf-8'):
         super().__init__(df, logger, identifier=identifier)
-        self._engine = self._create_mysql_engine(username, password, server, self.uuid)
+        self._encoding = encoding
+
+        if database is None:
+            self._database = self.uuid
+        else:
+            self._database = database
+
+        self._engine = self._create_mysql_engine(username, password, server, self._database)
         self._server = server
         self._username = username
         self._password = password
+        self._use_index = use_index
 
     def _create_mysql_engine(self, username, password, server, database):
-        return create_engine('mysql://{}:{}@{}/{}'.format(username, password, server, database))
+        return create_engine('mysql://{}:{}@{}/{}?charset={}'.format(username, password, server, database, self._encoding))
 
     def get_connection(self):
-        return "jdbc:mysql://{}:{}@{}/{}".format(self._username, self._password, self._server, self.uuid)
-
-
+        return "jdbc:mysql://{}:{}@{}/{}?charset={}".format(self._username, self._password, self._server, self._database, self._encoding)
 
     def subset(self, indices:List[int]) -> 'DataSet':
         return MysqlDataSet(self.data.iloc[indices], self._username, self._password,
                             self._server, identifier=self.uuid)
 
-    def write(self, if_exists:str=None):
+    def write(self, if_exists:str=None, use_index=True):
         jp.java.lang.Class.forName("com.mysql.jdbc.Driver",
                                    True, jp.java.lang.ClassLoader.getSystemClassLoader())
         from sqlalchemy_utils import database_exists, create_database
         if not database_exists(self._engine.url):
              create_database(self._engine.url)
 
-        super().write(if_exists=if_exists)
+        super().write(if_exists=if_exists, use_index=use_index)
 
 class FirebirdDataSet(SqlDataSet):
     ''' Good for larger datasets '''
@@ -623,7 +632,7 @@ class FirebirdDataSet(SqlDataSet):
         return FirebirdDataSet(self.data.iloc[indices], self._username, self._password,
                             self._server, identifier=self.uuid)
 
-    def write(self, if_exists:str=None):
+    def write(self, if_exists:str=None, use_index=True):
 
         def _create_database():
             return self._engine.dialect.dbapi.create_database(
@@ -643,7 +652,8 @@ class FirebirdDataSet(SqlDataSet):
 
 class DefaultDataSet(SqlDataSet):
 
-    def __init__(self, df: pd.DataFrame, db_folder:str=None, logger:logging.Logger=None, identifier=None):
+    def __init__(self, df: pd.DataFrame, db_folder:str=None, logger:logging.Logger=None, identifier=None, cleanup=True,
+                 overwrite_if_exists=True):
 
         super().__init__(df, logger, identifier)
 
@@ -651,8 +661,9 @@ class DefaultDataSet(SqlDataSet):
             else bayesianpy.utils.get_path_to_parent_dir(os.path.basename(os.getcwd()))
 
         self._create_folder()
-
+        self._cleanup = cleanup
         self._engine = self._create_sqlite_engine()
+        self._overwrite = overwrite_if_exists
 
     def get_connection(self):
         return "jdbc:sqlite:{}.db".format(os.path.join(self._db_dir, "db", self.uuid))
@@ -665,12 +676,19 @@ class DefaultDataSet(SqlDataSet):
         if not os.path.exists(os.path.join(self._db_dir, "db")):
             os.makedirs(os.path.join(self._db_dir, "db"))
 
+    def write(self, if_exists:str=None, use_index=True):
+        if os.path.exists(os.path.join(self._db_dir, "db", "{}.db".format(self.uuid))) and not self._overwrite:
+            return
+        else:
+            super().write(if_exists)
+
     def cleanup(self):
-        self._logger.debug("Cleaning up: deleting db folder")
-        try:
-            shutil.rmtree(os.path.join(self._db_dir, "db"))
-        except:
-            self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
+        if self._cleanup:
+            self._logger.debug("Cleaning up: deleting db folder")
+            try:
+                shutil.rmtree(os.path.join(self._db_dir, "db"))
+            except:
+                self._logger.error("Could not delete the db folder {} for some reason.".format(self._db_dir))
 
     def subset(self, indices:List[int]) -> 'DataSet':
         return DefaultDataSet(self.data.loc[indices], self._db_dir, self._logger, identifier=self.uuid)
@@ -690,8 +708,12 @@ class DaskDataset(DataSet):
     def cleanup(self):
         pass
 
-    def subset(self, indices):
-        raise NotImplementedError("Haven't got round to doing this yet.")
+    def subset(self, indices:List[int]):
+        try:
+            return DaskDataset(self.data.loc[indices])
+        except BaseException as e:
+            # probably a Dask dataframe which doesn't have loc.
+            raise NotImplementedError("Haven't got round to doing this yet.")
 
 
 def as_probability(series, output_column='cdf'):
