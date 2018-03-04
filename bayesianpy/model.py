@@ -12,6 +12,7 @@ import bayesianpy.network
 import pandas as pd
 from bayesianpy.jni import bayesServer
 from bayesianpy.jni import bayesServerParams
+from bayesianpy.jni import bayesServerStatistics
 from bayesianpy.jni import jp
 import numpy as np
 import logging
@@ -20,8 +21,8 @@ import pathos.multiprocessing as mp
 import itertools
 import math
 import bayesianpy.reader
-from typing import List, Dict
-import dask
+from typing import List, Dict, Tuple
+import dask.dataframe as dd
 import dill
 
 class QueryOutput:
@@ -41,6 +42,26 @@ class QueryBase:
         pass
 
 
+class QueryContext(object):
+
+    def __init__(self, network: bayesianpy.network.Network):
+        self._engine = None
+        self._evidence = None
+        self._network = network
+        self._query = None
+
+    def __enter__(self) -> Tuple['InferenceEngine', 'Evidence', 'Query']:
+        self._engine = InferenceEngine(self._network.jclass()).create_engine()
+        self._evidence = Evidence(self._network.jclass(), self._engine)
+        self._query = Query(self._network.jclass(), self._engine, logging.getLogger(__name__))
+        return (self._engine, self._evidence, self._query)
+
+    def __exit__(self, type, value, traceback):
+        self._engine = None
+        self._evidence = None
+        self._query = None
+
+
 class InferenceEngine:
     _inference_factory = None
 
@@ -56,6 +77,7 @@ class InferenceEngine:
     def create_engine(self):
         return self.get_inference_factory().createInferenceEngine(self._network)
 
+    @deprecated("Just use create_engine or the using block")
     def create(self, loglikelihood=False, conflict=False, retract=False):
         query_options = self.get_inference_factory().createQueryOptions()
         query_output = self.get_inference_factory().createQueryOutput()
@@ -86,6 +108,7 @@ class Query:
                :return: a QueryOutput object with separate continuous/ discrete dataframes
                """
         for query in queries:
+            query.reset()
             query.setup(self._network, self._inference_engine, self._query_options)
 
         if evidence is not None:
@@ -174,6 +197,9 @@ class Evidence:
         return self._evidence
 
     def set(self, variable_name, value:object):
+        if pd.isnull(value):
+            return
+
         v = self._variables.get(variable_name)
         if v is None:
             raise ValueError("The variable {} is not present in the network".format(v))
@@ -182,9 +208,16 @@ class Evidence:
             if v is None:
                 raise ValueError("Node {} does not exist".format(variable_name))
 
-            st = v.getStates().get(value)
-            if st is None:
-                raise ValueError("State {} does not exist in variable {}".format(value, variable_name))
+            if bayesianpy.network.is_variable_discretised(v):
+                for st in v.getStates():
+                    interval = st.getValue()
+                    if bayesianpy.network.interval_is_between(value, interval):
+                        # implicitly assigned st, as we're coming out of the loop.
+                        break
+            else:
+                st = v.getStates().get(str(value))
+                if st is None:
+                    raise ValueError("State {} does not exist in variable {}".format(value, variable_name))
 
             self._evidence.setState(st)
 
@@ -601,13 +634,57 @@ class QueryMeanVariance(QueryBase):
     def __str__(self):
         return "P({})".format(self._variable_name)
 
+class QueryKLDivergence(QueryBase):
+
+    def __init__(self, variable_a, variable_b):
+        self._variable_a_name = variable_a
+        self._variable_b_name = variable_b
+
+    def setup(self, network, inference_engine, query_options):
+        distributions = []
+        variables = []
+        for variable_name in [self._variable_a_name, self._variable_b_name]:
+            variable = bayesianpy.network.get_variable(network, variable_name)
+
+            if not bayesianpy.network.get_variable(network, variable_name):
+                raise ValueError("Variable {} does not exist in the network".format(variable_name))
+
+            if bayesianpy.network.is_variable_continuous(variable_name):
+                distributions.append(bayesServer().CLGaussian(variable))
+            else:
+                distributions.append(bayesServer().Table(variable))
+
+            variables.append(variable)
+
+        for query in distributions:
+            inference_engine.getQueryDistributions().add(bayesServerInference().QueryDistribution(query))
+
+        query_options.setQueryEvidenceMode(bayesServerInference().QueryEvidenceMode.RETRACT_QUERY_EVIDENCE)
+
+        self._distributions = distributions
+        self._variables = variables
+
+    def results(self, inference_engine, query_output):
+
+        a = self._distributions[0]
+        b = self._distributions[1]
+
+        kl = bayesServerStatistics().KullbackLiebler.Divergence(a, b, bayesServerStatistics().LogarithmBase.Natural)
+
+        return {self._variable_a_name + "_" + self._variable_b_name: kl}
+
+    def reset(self):
+        self._distributions = None
+        self._variables = None
+
 
 def _batch_query(df: pd.DataFrame, network_string: str,
                  variable_references: List[str],
                  queries: List[QueryBase],
                  create_data_reader_command:bayesianpy.reader.CreatableWithDf,
                  create_data_reader_options:bayesianpy.reader.Creatable,
-                 logger:logging.Logger=None):
+                 logger:logging.Logger=None,
+                ):
 
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -626,6 +703,9 @@ def _batch_query(df: pd.DataFrame, network_string: str,
         reader_options = create_data_reader_options.create()
         variable_refs = list(bayesianpy.network.create_variable_references(network, schema,
                                                                            variable_references=variable_references))
+
+        if len(variable_refs) == 0:
+            raise ValueError("Could not match any variables in the supplied dataset with the network. Is it the same?")
 
         reader = bayesServer().data.DefaultEvidenceReader(data_reader, jp.java.util.Arrays.asList(variable_refs),
                                                           reader_options)
@@ -687,10 +767,13 @@ class BatchQuery:
         self._logger = logger
         self._datastore = datastore
         # serialise the network as a string.
-        from xml.dom import minidom
-        nt = network.saveToString()
-        reparsed = minidom.parseString(nt)
-        self._network = reparsed.toprettyxml(indent="  ")
+        if isinstance(network, bayesianpy.network.Network):
+            self._network = network.to_xml()
+        else:
+            from xml.dom import minidom
+            nt = network.saveToString()
+            reparsed = minidom.parseString(nt)
+            self._network = reparsed.toprettyxml(indent="  ")
 
     def _calc_num_threads(self, df_size: int, query_size: int, max_threads=None) -> int:
         num_queries = df_size * query_size
@@ -769,10 +852,16 @@ class DaskBatchQuery:
         self._logger = logging.getLogger(__name__)
         self._datastore = datastore
         # serialise the network as a string.
-        from xml.dom import minidom
-        nt = network.saveToString()
-        reparsed = minidom.parseString(nt)
-        self._network = reparsed.toprettyxml(indent="  ")
+        if isinstance(network, bayesianpy.network.Network):
+            self._network = network.to_xml()
+        else:
+            from xml.dom import minidom
+            nt = network.saveToString()
+            reparsed = minidom.parseString(nt)
+            self._network = reparsed.toprettyxml(indent="  ")
+
+        if not isinstance(datastore.get_dataframe(), dd.DataFrame):
+            raise ValueError("Dataframe has to be of type Dask.DataFrame")
 
     def _calc_num_threads(self, df_size: int, query_size: int, max_threads=None) -> int:
         num_queries = df_size * query_size
@@ -856,7 +945,7 @@ class TrainingResults:
         return self._metrics
 
     def get_network(self):
-        return self._network
+        return bayesianpy.network.Network(self._network)
 
     def get_model(self):
         return NetworkModel(self._network, self._logger)
@@ -954,7 +1043,7 @@ class NetworkModel:
         if maximum_iterations is not None:
             learning_options.setMaximumIterations(maximum_iterations)
 
-        data_reader_command = dataset.create_data_reader_command().create()
+        data_reader_command = dataset.create_data_reader_command().create(None)
         reader_options = dataset.get_reader_options().create()
 
         variable_references = list(bayesianpy.network.create_variable_references(self._jnetwork, dataset.get_dataframe()))
