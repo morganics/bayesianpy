@@ -175,7 +175,7 @@ class AutoStructure(Template):
         if len(self._links) > 0 and self._use_same_model:
             return self._links
 
-        data_reader_command = self._dataset.create_data_reader_command().create()
+        data_reader_command = self._dataset.create_data_reader_command().create(None)
 
         reader_options = self._dataset.get_reader_options().create()
         network.getLinks().clear()
