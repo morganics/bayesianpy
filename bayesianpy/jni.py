@@ -21,8 +21,12 @@ def attach(logger=None, heap_space='6g'):
         if platform.system() == "Linux":
             separator = ":"
 
-        classpath = ".{0}{1}{0}{2}".format(separator, os.path.join(path_to_package, 'bin/bayesserver-{}.jar'.format(BAYES_SERVER_VERSION)),
-                                           os.path.join(path_to_package, 'bin/sqlite-jdbc-3.8.11.2.jar'))
+        jars = ['bin/bayesserver-{}.jar'.format(BAYES_SERVER_VERSION), 'bin/sqlite-jdbc-3.8.11.2.jar',
+                'bin/mysql-connector-java-5.0.8-bin.jar', 'bin/jaybird-full-3.0.2.jar']
+        classpath = ".{}".format(separator)
+        for jar in jars:
+            if os.path.exists(os.path.join(path_to_package, jar)):
+                classpath += "{}{}".format(os.path.join(path_to_package, jar), separator)
 
         if logger is not None:
              logger.debug("Starting JVM ({})...".format(classpath))
@@ -59,3 +63,5 @@ def bayesServerStructure():
 def bayesServerSampling():
     return jp.JPackage("com.bayesserver.data.sampling")
 
+def bayesServerStatistics():
+    return jp.JPackage("com.bayesserver.statistics")
