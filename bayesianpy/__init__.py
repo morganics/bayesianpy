@@ -4,7 +4,7 @@ from bayesianpy import insight
 from bayesianpy import model
 from bayesianpy import network
 from bayesianpy import template
-from bayesianpy import visual
+#from bayesianpy import visual
 from bayesianpy.jni import bayesServer as _bs
 from bayesianpy import utils
 from bayesianpy import analysis
