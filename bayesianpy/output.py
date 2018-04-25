@@ -258,6 +258,9 @@ class QueryModelStatistics(QueryStatistics):
 
 class QueryFactory:
     def __init__(self, class_type, *args, **kwargs):
+        assert isinstance(class_type, type), "Needs to be a type"
+
+
         self._class_type = class_type
         self._args = args
         self._kwargs = kwargs

@@ -5,7 +5,7 @@ import os
 
 from sklearn.metrics import accuracy_score
 import dask.dataframe as dd
-import bayesianpy.dask as dk
+import bayesianpy.distributed as dk
 
 def main():
 
