@@ -2,6 +2,7 @@ from bayesianpy import data
 from bayesianpy import insight
 #from bayespy import ml
 from bayesianpy import model
+from bayesianpy import output
 from bayesianpy import network
 from bayesianpy import template
 #from bayesianpy import visual
