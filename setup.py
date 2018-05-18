@@ -11,7 +11,7 @@ setup(
     description='', 
 	install_requires=['pandas', 'sqlalchemy',
                       'numpy',
-                      'jpype1>=0.6.1', 'pathos', 'scikit-learn',
+                      'jpype1>=0.6.3', 'pathos', 'scikit-learn',
                       'scipy',
                       'dask[complete]==0.16',
                       'multiprocess'
