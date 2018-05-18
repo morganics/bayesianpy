@@ -81,6 +81,7 @@ class MixtureNaiveBayes(Template):
 
         if not dk.empty(self._continuous):
             for c_name in self._continuous.columns:
+                self._logger.info("Pre-processing {} column".format(c_name))
                 c = builder.create_continuous_variable(network, c_name)
                 try:
                     builder.create_link(network, cluster, c)
