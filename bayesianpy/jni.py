@@ -1,6 +1,6 @@
 import jpype as jp
 import os
-import bayesianpy.utils
+import bayesianpy.utils.dir
 import platform
 
 BAYES_SERVER_VERSION = "7.24"
@@ -16,7 +16,7 @@ def attach(logger=None, heap_space='6g'):
         logger.debug("JVM Started: {}".format(jp.isJVMStarted()))
 
     if not jp.isJVMStarted():
-        path_to_package = bayesianpy.utils.get_path_to_parent_dir(__file__)
+        path_to_package = bayesianpy.utils.dir.get_path_to_parent(__file__)
         separator = ";"
         if platform.system() == "Linux":
             separator = ":"
