@@ -20,8 +20,16 @@ class CrossValidationTestCase(unittest.TestCase):
         ds = dd.from_pandas(iris.create_iris_dataset(), npartitions=2)
         total_length = len(ds)
         kf = cross_validation.KFold(4)
+        ds['unique_index'] = 1
+        ds['unique_index'] = ds['unique_index'].cumsum()
         folds = 0
         for (training, testset) in kf.split(ds):
+            train_indices = set(training.unique_index.compute().tolist())
+            test_indices = set(testset.unique_index.compute().tolist())
+
+            self.assertEqual(len(train_indices.intersection(test_indices)), 0)
+            self.assertEqual(len(train_indices) + len(test_indices), total_length)
+
             self.assertTrue(((total_length / 4) * 3) - 10< len(training) <= ((total_length / 4) * 3) + 10, "{} is more or less than expected value {}".format(len(training), (len(ds) / 4) * 3))
             self.assertTrue(((total_length / 4) - 10) < len(testset) <= ((total_length / 4) + 10))
             folds += 1

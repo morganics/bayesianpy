@@ -4,6 +4,7 @@ import pandas as pd
 import dask.dataframe as dd
 import numpy as np
 from typing import List
+import asyncio
 import logging
 
 class Creatable:
@@ -74,25 +75,64 @@ def _to_java_class(data_type):
 
 
 class PandasDataReader:
-    def __init__(self, df:dd.DataFrame, partition_order:List[int]=None):
+    def __init__(self, df:dd.DataFrame, preloading:bool=True):
         self._logger = logging.getLogger(__name__)
         self._df = df
         self._columns = ["ix"] + [str(col) for col in self._df.columns.tolist()]
         self._dtypes = [df.index.dtype] + df.dtypes.tolist()
         self._i = 0
-        self._ordered_partitions = partition_order
+        self._preloading = preloading
         self._iterator = self._iterator()
         self._object_accessors = None
+
+    def get_partition_index(self):
+        return self._partition
+
+    def get_loaded_partition_index(self):
+        return self._partition_loaded
 
     def _iterator(self):
         if hasattr(self._df, 'npartitions'):
             # is a dask dataframe.
-            for i in range(len(self._ordered_partitions)):
-                ordered_partition = self._ordered_partitions[i]
-                self._logger.info("Partition {}".format(ordered_partition))
-                df = self._df.get_partition(ordered_partition).compute()
-                for row in df.itertuples():
-                    yield row
+            df = None
+            self._partition_loaded = 0
+            if self._preloading:
+
+                loop = asyncio.get_event_loop()
+
+                @asyncio.coroutine
+                def _get_partition(i):
+                    pp = self._df.get_partition(i).compute(scheduler='threads')
+                    return pp
+
+                self._partition = 0
+
+                for i in range(self._df.npartitions):
+                    task = None
+                    self._partition = i
+                    self._logger.info("Partition {}".format(i))
+                    if df is None:
+                        df = self._df.get_partition(i).compute()
+
+                    if i < self._df.npartitions-1:
+                        print(i)
+                        task = loop.run_until_complete(_get_partition(i+1))
+
+                    for row in df.itertuples():
+                        yield row
+
+                    if task is not None:
+                        df = yield from task
+                        self._partition_loaded = i+1
+            else:
+                for i in range(self._df.npartitions):
+                    self._partition = i
+                    self._logger.info("Partition {}".format(i))
+
+                    df = self._df.get_partition(i).compute()
+
+                    for row in df.itertuples():
+                        yield row
         else:
             # is a pandas dataframe.
             for row in self._df.itertuples():
@@ -175,32 +215,15 @@ class PandasDataReader:
 
 
 class PandasDataReaderCommand:
-    def __init__(self, df:dd.DataFrame):
+    def __init__(self, df:dd.DataFrame, preload:bool=True):
         self._df = df
         self._logger = logging.getLogger(__name__)
         self._i = 0
-        self._ordered_partitions = None
-
-    def _order_partitions(self, df):
-        ordering = {}
-        for partition in range(df.npartitions):
-            p = df.get_partition(partition).head(1)
-            if p.empty:
-                continue
-
-            ordering.update({partition: int(p.index[0])})
-
-        partitions = sorted(ordering, key=ordering.get)
-        self._logger.info("Ordered Partitions: {}".format(partitions))
-        return partitions
+        self._preload=preload
 
     def executeReader(self) -> jp.JProxy:
         self._i += 1
         self._logger.info("Creating Dask Data Reader (iteration: {})".format(self._i))
 
-        if self._ordered_partitions is None and hasattr(self._df, 'npartitions'):
-            # is a dask dataframe
-            self._ordered_partitions = self._order_partitions(self._df)
-
         return jp.JProxy("com.bayesserver.data.DataReader",
-                                 inst=PandasDataReader(self._df, self._ordered_partitions))
+                                 inst=PandasDataReader(self._df, self._preload))

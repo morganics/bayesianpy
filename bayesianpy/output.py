@@ -10,6 +10,7 @@ from bayesianpy.decorators import deprecated
 
 import bayesianpy.network
 import pandas as pd
+import bayesianpy.jni
 from bayesianpy.jni import bayesServer
 from bayesianpy.jni import bayesServerStatistics
 from bayesianpy.jni import jp
@@ -33,6 +34,7 @@ class QueryBase:
 
     def reset(self):
         pass
+
 
 class Distribution:
 
@@ -136,16 +138,17 @@ class QueryConditionalJointProbability(QueryBase):
 
             if bayesianpy.network.is_variable_discrete(v):
                 if h in self._head_variables:
-                    #raise ValueError("Bayespy only supports discrete tail variables (BayesServer is fine with it though!)")
+                    # raise ValueError("Bayespy only supports discrete tail variables (BayesServer is fine with it though!)")
                     self._is_discrete_head = True
 
                 self._discrete_variables.append(v.getName())
             else:
                 if h in self._tail_variables:
-                    raise ValueError("Bayespy only supports continuous head variables (BayesServer is fine with it though!)")
+                    raise ValueError(
+                        "Bayespy only supports continuous head variables (BayesServer is fine with it though!)")
 
             contexts.append(bayesServer().VariableContext(v, bayesServer().HeadTail.HEAD if h in self._head_variables
-                                                                    else bayesServer().HeadTail.TAIL))
+            else bayesServer().HeadTail.TAIL))
 
         self._network = network
         if self._is_discrete_head:
@@ -158,6 +161,7 @@ class QueryConditionalJointProbability(QueryBase):
 
     def results(self, inference_engine, query_output):
         results = {}
+
         def state_generator(variables):
             for v in variables:
                 tv = bayesianpy.network.get_variable(self._network, v)
@@ -196,13 +200,13 @@ class QueryConditionalJointProbability(QueryBase):
                         state_array[i] = state
 
                         dist = Distribution(self._head_variables, self._tail_variables,
-                                             [state.getName() for state in state_combinations])
-                        for i,h in enumerate(self._head_variables):
+                                            [state.getName() for state in state_combinations])
+                        for i, h in enumerate(self._head_variables):
                             v = bayesianpy.network.get_variable(self._network, h)
                             mean = self._distribution.getMean(v, state_array)
                             if dist.is_covariant():
                                 dist.append_mean(mean)
-                                for j,h1 in enumerate(self._head_variables):
+                                for j, h1 in enumerate(self._head_variables):
                                     v1 = bayesianpy.network.get_variable(self._network, h1)
                                     cov = self._distribution.getCovariance(v, v1, state_array)
                                     dist.set_covariance_value(i, j, cov)
@@ -260,7 +264,6 @@ class QueryFactory:
     def __init__(self, class_type, *args, **kwargs):
         assert isinstance(class_type, type), "Needs to be a type"
 
-
         self._class_type = class_type
         self._args = args
         self._kwargs = kwargs
@@ -314,7 +317,7 @@ class QueryMostLikelyState(QueryBase):
 class QueryStateProbability(QueryMostLikelyState):
 
     def __init__(self, target_variable_name, variable_state_separator=bayesianpy.network.STATE_DELIMITER,
-                        suffix="_probability", target_state_name: str=None):
+                 suffix="_probability", target_state_name: str = None):
         super().__init__(target_variable_name=target_variable_name, output_dtype="float64", suffix=suffix)
         self._variable_state_separator = variable_state_separator
         self._target_state_name = target_state_name
@@ -333,7 +336,7 @@ class QueryStateProbability(QueryMostLikelyState):
                 states.update({self._target_variable_name + self._suffix: p})
             else:
                 states.update({self._target_variable_name + self._variable_state_separator + state.getName()
-                           + self._suffix: p})
+                               + self._suffix: p})
 
         if len(states) == 0:
             raise ValueError("QueryStateProbability: the target state name did not match any variables")
@@ -350,8 +353,8 @@ class QueryLogLikelihood(QueryBase):
             raise ValueError("QueryLogLikelihood: Requires a non-empty list of variables for creating a distribution")
 
         if len(set(variable_names)) != len(variable_names):
-            raise ValueError("QueryLogLikelihood: There are duplicate variable names in the query: {}".format(", ".join(variable_names)))
-
+            raise ValueError("QueryLogLikelihood: There are duplicate variable names in the query: {}".format(
+                ", ".join(variable_names)))
 
         self._variable_names = variable_names
         self._distribution = None
@@ -432,7 +435,7 @@ class QueryMeanVariance(QueryBase):
 
         if np.isnan(mean):
             return {self._variable_name + self._result_mean_suffix: self._default_value,
-                self._variable_name + self._result_variance_suffix: self._default_value}
+                    self._variable_name + self._result_variance_suffix: self._default_value}
 
         return {self._variable_name + self._result_mean_suffix: mean,
                 self._variable_name + self._result_variance_suffix: self._query.getVariance(self._variable)}
@@ -443,6 +446,7 @@ class QueryMeanVariance(QueryBase):
 
     def __str__(self):
         return "P({})".format(self._variable_name)
+
 
 class QueryKLDivergence(QueryBase):
 
@@ -491,11 +495,10 @@ class QueryKLDivergence(QueryBase):
 def _batch_query(df: pd.DataFrame, network_string: str,
                  variable_references: List[str],
                  queries: List[QueryFactory],
-                 create_data_reader_command:bayesianpy.reader.CreatableWithDf,
-                 create_data_reader_options:bayesianpy.reader.Creatable,
-                 logger:logging.Logger=None,
-                ):
-
+                 create_data_reader_command: bayesianpy.reader.CreatableWithDf,
+                 create_data_reader_options: bayesianpy.reader.Creatable,
+                 logger: logging.Logger = None,
+                 ):
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -523,7 +526,6 @@ def _batch_query(df: pd.DataFrame, network_string: str,
         reader_options = create_data_reader_options.create()
         variable_refs = list(bayesianpy.network.create_variable_references(network, schema,
                                                                            variable_references=variable_references))
-
         if len(variable_refs) == 0:
             raise ValueError("Could not match any variables in the supplied dataset with the network. Is it the same?")
 
@@ -540,6 +542,7 @@ def _batch_query(df: pd.DataFrame, network_string: str,
         ev = bayesianpy.model.Evidence(network, inference_engine).apply()
 
         results = []
+
         i = 0
         try:
             while reader.read(ev, bayesServer().data.DefaultReadOptions(True)):
@@ -563,7 +566,6 @@ def _batch_query(df: pd.DataFrame, network_string: str,
                 if i % 500 == 0:
                     logger.info("Queried case {}".format(i))
 
-
                 i += 1
         except BaseException as e:
             logger.error("Unexpected Error!")
@@ -576,6 +578,7 @@ def _batch_query(df: pd.DataFrame, network_string: str,
 
         return pd.DataFrame(results).set_index('caseid')
 
+
     except BaseException as e:
         q = [str(query) for query in query_instances]
 
@@ -583,7 +586,7 @@ def _batch_query(df: pd.DataFrame, network_string: str,
 
 
 class BatchQuery:
-    def __init__(self, network, datastore:bayesianpy.data.DataSet, logger: logging.Logger):
+    def __init__(self, network, datastore: bayesianpy.data.DataSet, logger: logging.Logger):
         self._logger = logger
         self._datastore = datastore
         # serialise the network as a string.
@@ -622,8 +625,6 @@ class BatchQuery:
     def query(self, queries: List[QueryFactory] = None, append_to_df=True,
               variable_references: List[str] = None, max_threads=None):
 
-
-
         if not hasattr(queries, "__getitem__"):
             queries = [queries]
 
@@ -643,9 +644,9 @@ class BatchQuery:
 
         if processes == 1:
             pdf = _batch_query(schema, nt,
-                                            variable_references, queries,
-                                            self._datastore.create_data_reader_command(),
-                                            self._datastore.get_reader_options())
+                               variable_references, queries,
+                               self._datastore.create_data_reader_command(),
+                               self._datastore.get_reader_options())
         else:
             # bit nasty, but the only way I could get jpype to stop hanging in Linux.
             ctx._force_start_method('spawn')
@@ -661,13 +662,14 @@ class BatchQuery:
 
                 # logger with StreamHandler does not pickle, so best to leave it out as an option.
                 for result_set in pool.map(lambda drc: _batch_query(schema, nt, variable_references, queries,
-                                                                   drc, ro), commands):
+                                                                    drc, ro), commands):
                     pdf = pdf.append(result_set)
 
         if append_to_df:
             return self._datastore.get_dataframe().join(pdf)
         else:
             return pdf
+
 
 class DaskBatchQuery:
     def __init__(self, network, datastore: bayesianpy.data.DaskDataset):
@@ -711,13 +713,13 @@ class DaskBatchQuery:
 
     def _generate_dask_metadata(self, row, variable_references, queries) -> pd.DataFrame:
         meta = _batch_query(row, self._network, variable_references, queries,
-                                self._datastore.create_data_reader_command(),
-                                self._datastore.get_reader_options())
+                            self._datastore.create_data_reader_command(),
+                            self._datastore.get_reader_options())
 
-        #row = row.append(meta)
+        # row = row.append(meta)
 
-        #for query in queries:
-            # empty JPype references out, so we don't try and pickle them later.
+        # for query in queries:
+        # empty JPype references out, so we don't try and pickle them later.
         #    query.reset()
 
         return bayesianpy.data.DataFrame.get_schema(meta)
@@ -749,9 +751,9 @@ class DaskBatchQuery:
                                     create_data_reader_options=ro,
                                     logger=self._logger,
                                     meta=metadata)
-            #.compute(get=multiprocessing.get,
-            #                                               num_workers=self._calc_num_threads(len(dk), len(queries),
-            #                                               max_threads=max_threads))
+        # .compute(get=multiprocessing.get,
+        #                                               num_workers=self._calc_num_threads(len(dk), len(queries),
+        #                                               max_threads=max_threads))
         if append_to_df:
             return dk.join(results)
         else:

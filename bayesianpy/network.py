@@ -2,12 +2,12 @@ import pandas as pd
 import uuid
 from bayesianpy.jni import *
 from bayesianpy.data import DataFrame
+import bayesianpy.data
 import os
 from typing import List, Tuple
 import numpy as np
 from typing import Iterator, Optional
 from . import distributed as dk
-import dask
 
 def create_network():
     return bayesServer().Network(str(uuid.getnode()))
@@ -117,66 +117,6 @@ class Buildable(object):
         pass
 
 
-class NetworkDiscreteNodeBuilder(Buildable):
-    def __init__(self, network, node_names: List[str]):
-        self._node_names = node_names
-        self._network = network
-
-    @dask.delayed
-    def using(self, df) -> ('Network', List):
-        network = self._network.copy()
-        nodes = []
-        for node in self._node_names:
-            nodes.append(Builder.create_discrete_variable(network, df, node))
-
-        return Network(network), nodes
-
-
-class NetworkContinuousNodeBuilder(Buildable):
-    def __init__(self, network, node_names: List[str]):
-        self._network = network
-        self._node_names = node_names
-
-    @dask.delayed
-    def using(self) -> ('Network', List):
-        network = self._network.copy()
-        nodes = []
-        for node in self._node_names:
-            nodes.append(Builder.create_continuous_variable(network, node))
-
-        return Network(network), nodes
-
-
-class NetworkDiscretisedNodeBuilder(Buildable):
-    def __init__(self, network, node_names: List[str]):
-        self._network = network
-        self._node_names = node_names
-
-    @dask.delayed
-    def using(self, df) -> ('Network', List):
-        network = self._network.copy()
-        nodes = [node for node in Builder.create_discretised_variables(network, df, self._node_names)]
-        return Network(network), nodes
-
-
-class NetworkNodeBuilder:
-    def __init__(self, network, node_names: List[str]):
-        self._node_names = node_names
-        self._network = network
-
-    @dask.delayed
-    def discrete(self, df: pd.DataFrame) -> NetworkDiscreteNodeBuilder:
-        return NetworkDiscreteNodeBuilder(self._network, self._node_names, df)
-
-    @dask.delayed
-    def continuous(self) -> NetworkContinuousNodeBuilder:
-        return NetworkContinuousNodeBuilder(self._network, self._node_names)
-
-    @dask.delayed
-    def discretised(self, df: pd.DataFrame) -> NetworkDiscretisedNodeBuilder:
-        return NetworkDiscretisedNodeBuilder(self._network, self._node_names, df)
-
-
 class NetworkNode:
     def __init__(self, network, node):
         self._node = node
@@ -194,6 +134,18 @@ class NetworkNode:
             raise ValueError("There were multiple variables associated with the node")
 
         return NetworkVariable(self._network, v.get(0))
+
+    def links(self) -> 'NetworkLinks':
+        node = self._node
+        return NetworkLinks(self._network, node.getLinks())
+
+    def parents(self) -> 'NetworkNodes':
+        node = self._node
+        return NetworkNodes(self._network, [link.getTo() for link in node.getLinksIn()])
+
+    def children(self) -> 'NetworkNodes':
+        node = self._node
+        return NetworkNodes(self._network, [link.getTo() for link in node.getLinksOut()])
 
 
     def type(self) -> str:
@@ -314,20 +266,8 @@ class NetworkNodes:
     def get(self, name: str) -> NetworkNode:
         return NetworkNode(self._network, get_node(self._network, name))
 
-    def add(self, node_names: List[str]):
-        return NetworkNodeBuilder(self._network, node_names)
-
-    def links(self, name: str) -> 'NetworkLinks':
-        node = get_node(self._network, name)
-        return NetworkLinks(self._network, node.getLinks())
-
-    def parents(self, name: str) -> 'NetworkNodes':
-        node = get_node(self._network, name)
-        return NetworkNodes(self._network, [link.getTo() for link in node.getLinksIn()])
-
-    def children(self, name: str) -> 'NetworkNodes':
-        node = get_node(self._network, name)
-        return NetworkNodes(self._network, [link.getTo() for link in node.getLinksOut()])
+    #def add(self, node_names: List[str]):
+    #    return NetworkNodeBuilder(self._network, node_names)
 
     def has_distributions(self) -> bool:
         return all(node.getDistribution() != None for node in self._nodes)
@@ -491,10 +431,24 @@ class Builder:
         title += ")" if interval.getMaximumEndPoint() == bayesServer().IntervalEndPoint.OPEN else "]"
         return title
 
+
+    @staticmethod
+    def create_utility_node(network, node_name):
+        n = Builder.try_get_node(network, node_name)
+        if n is not None:
+            return n
+
+        v = bayesServer().Variable(node_name, bayesServer().VariableValueType.CONTINUOUS, bayesServer().VariableKind.Utility)
+        n_ = bayesServer().Node(v)
+
+        network.getNodes().add(n_)
+
+        return n_
+
     @staticmethod
     def create_discretised_variables(network, data, node_names, bin_count=4, infinite_extremes=True,
                                      decimal_places=4, mode='EqualFrequencies',
-                                     zero_crossing=True, defined_bins: List[Tuple[float, float]] = None):
+                                     zero_crossing=True, defined_bins: List[Tuple[float, float]] = None,):
         node_names = [str(name) for name in node_names]
         if defined_bins is None:
             options = bayesServerDiscovery().DiscretizationOptions()
@@ -865,7 +819,7 @@ def create_variable_references(network, data, variable_references=[]):
         variables = network.getVariables()
     else:
         for v in variable_references:
-            variables.append(bayesianpy.network.get_variable(network, v))
+            variables.append(get_variable(network, v))
 
     latent_variable_name = "Cluster"
     for v in variables:
@@ -882,7 +836,7 @@ def create_variable_references(network, data, variable_references=[]):
         if v.getStateValueType() == bayesServer().StateValueType.NONE:
             valueType = bayesServer().data.ColumnValueType.NAME
         elif v.getStateValueType() != bayesServer().StateValueType.DOUBLE_INTERVAL \
-                and bayesianpy.network.is_variable_discrete(v):
+                and is_variable_discrete(v):
 
             if not DataFrame.is_int(data[name].dtype) and not DataFrame.is_bool(data[name].dtype) \
                     and not DataFrame.is_float(data[name].dtype):

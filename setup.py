@@ -13,7 +13,7 @@ setup(
                       'numpy',
                       'jpype1>=0.6.3', 'pathos', 'scikit-learn',
                       'scipy',
-                      'dask[complete]==0.16',
+                      'dask[complete]==0.18',
                       'multiprocess'
                       ],
     include_package_data=True
