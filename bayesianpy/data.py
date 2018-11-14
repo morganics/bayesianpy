@@ -13,7 +13,7 @@ import dask.dataframe as dd
 from typing import Iterable
 import bayesianpy.distributed as dk
 from collections import defaultdict
-from bayesianpy.utils import directory
+import bayesianpy.directory_utils
 import bayesianpy.reader
 
 class DataFrameReader:
@@ -658,7 +658,7 @@ class DefaultDataSet(SqlDataSet):
         super().__init__(df, logger, identifier)
 
         self._db_dir = db_folder if db_folder is not None \
-            else bayesianpy.utils.directory.get_path_to_parent(os.path.basename(os.getcwd()))
+            else bayesianpy.directory_utils.get_path_to_parent(os.path.basename(os.getcwd()))
 
         self._create_folder()
         self._cleanup = cleanup
