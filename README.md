@@ -1,6 +1,10 @@
 # BayesianPy
 
-A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1. This wrapper is not released/ supported/ endorsed by Bayes Server.
+## Disclaimer
+**This wrapper is not released/ supported/ endorsed by Bayes Server.** Please look at the examples on https://www.bayesserver.com/code/python/setup-py to understand how to implement the integration. These samples here might be out of date and do not keep up with the release cycle of the Bayes Server package (and also don't follow good software engineering practices). They might be useful as a reference, but will not (always/ typically) work out of the box. I am now doing some work on wrapping the .NET core DLLs which I've found to be a simpler process.
+ 
+## Information
+A Python SDK for performing common operations on the Bayes Server Java API, and trying to utilise the best of Python (e.g. dataframes and visualisation). This wraps calls to the Java API with Jpype1 (this library has now been updated and some of the examples do things that you no longer need to worry about).
 
 Supported functionality (currently only supports contemporal networks, although Bayes Server supports temporal networks as well):
 
@@ -14,7 +18,7 @@ Note: The SDK currently writes data to an SQLlite database which is then read by
 
 ## Motivation
 
-Python is a simpler language to put something together quickly and the Bayes Server API is very powerful; and consequently it can be time consuming to work with directly. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
+Python is a simpler language to put something together quickly and the Bayes Server API is very powerful, but gives you lots of options. I haven't tried to wrap every single piece of Java code, however I have tried to - in general - separate out any Java calls from the client of the SDK, to allow type hinting and remove any confusion of working through Jpype. You can do a lot more with the Java API directly, however the most common usage; creating network structures, training and querying networks should be mostly accounted for. The Java API is stable (e.g. it doesn't change very much from release to release) however this Python wrapper is very much in flux!
 
 ## Are Bayesian networks Bayesian? (from BayesServer.com)
 
